@@ -37,7 +37,7 @@ os.makedirs(MODELS_DIR, exist_ok=True)
 os.makedirs(EVALUATION_DIR, exist_ok=True)
 os.makedirs(ROUTER_PLOTS_DIR, exist_ok=True)
 
-INPUT_CSV = os.path.join(DATA_PROCESSED_DIR, "router_training_dataset.csv")
+INPUT_CSV = os.path.join(DATA_PROCESSED_DIR, "router_training_dataset_top_models.csv")
 MODEL_ROUTER_PATH = os.path.join(MODELS_DIR, "model_router.joblib")
 
 
@@ -47,9 +47,16 @@ MODEL_ROUTER_PATH = os.path.join(MODELS_DIR, "model_router.joblib")
 
 def get_target_column(df: pd.DataFrame) -> str:
     """
-    Prefer cost-aware best_value_model if available.
-    Fall back to best_model.
+    Prefer grouped top-model target if available.
+    Fall back to cost-aware best_value_model if available.
+    Fall back to raw best_model.
     """
+
+    if "best_model_top15" in df.columns:
+        return "best_model_top15"
+
+    if "best_value_model_top15" in df.columns:
+        return "best_value_model_top15"
 
     if "best_value_model" in df.columns:
         return "best_value_model"
@@ -58,10 +65,8 @@ def get_target_column(df: pd.DataFrame) -> str:
         return "best_model"
 
     raise ValueError(
-        "Router dataset must contain either 'best_value_model' or 'best_model'."
+        "Router dataset must contain a model target column."
     )
-
-
 # ------------------------------------------------------------
 # Feature helpers
 # ------------------------------------------------------------
@@ -584,14 +589,14 @@ def train_model_router(df: pd.DataFrame):
             ngram_range=(1, 2),
             min_df=2,
             max_df=0.95,
-            max_features=16000
+            max_features=10000
         )),
         ("char_tfidf", TfidfVectorizer(
             lowercase=True,
             analyzer="char_wb",
             ngram_range=(3, 5),
             min_df=2,
-            max_features=10000
+            max_features=8000
         ))
     ])
 
