@@ -27,30 +27,27 @@ Recommended Model
 ```
 ---
 ## Benchmark Data
-This project uses benchmark-style data based on `RouterBench`, a benchmark for evaluating multi-LLM routing systems.
 
-`RouterBench` was introduced in the paper `“ROUTERBENCH: A Benchmark for Multi-LLM Routing System.” `The benchmark is designed around the idea of routing prompts between different language models while balancing model performance and cost.
+This project uses benchmark-style data from `LLMRouterBench`, a large-scale benchmark and unified framework for LLM routing.
 
-### Useful links:
+`LLMRouterBench` is designed around the idea that no single language model performs best across every domain. Instead, different models can perform better on different types of prompts, such as math, coding, logic, knowledge, affective tasks, instruction following, and tool use.
 
-- `RouterBench` GitHub: https://github.com/withmartian/routerbench
-- `RouterBench` paper: https://arxiv.org/abs/2403.12031
+The benchmark includes standardized model outputs across multiple datasets and models, with fields such as:
 
-`RouterBench` is useful for this project because it frames model selection as a routing problem instead of assuming one model should answer every prompt.
+- `origin_query`
+- `prompt`
+- `prediction`
+- `ground_truth`
+- `score`
+- `prompt_tokens`
+- `completion_tokens`
+- `cost`
 
----
-v## Current Pipeline
-The current implementation has two main stages:
+This project uses that data to train a smaller prompt routing pipeline that predicts task type and recommends a model route.
 
-1. `Task Type Classifier`
-   - Extracts text and numeric features from prompts
-   - Predicts task categories such as coding, math, reasoning, medical, writing, knowledge, emotion, and agentic
+### Useful links
 
-2. `Model Router`
-   - Uses the original prompt, predicted task type, task confidence, and handcrafted features
-   - Predicts a recommended model class from the benchmark results
-   - Uses a top-model routing setup where the most common model labels are preserved and rare models are grouped as OTHER
----
+- `LLMRouterBench` GitHub: https://github.com/ynulihao/LLMRouterBench---
 
 ## Project Structure
 
@@ -608,14 +605,15 @@ The current project includes:
 - Evaluation plots and metrics
 
 ---
+## Citation
 
-## Work Cited
+This project uses data from `LLMRouterBench`. If you use this project or the original benchmark, cite the LLMRouterBench work.
 
 ```bibtex
-@article{hu2024routerbench,
-  title   = {ROUTERBENCH: A Benchmark for Multi-LLM Routing System},
-  author  = {Qitian Jason Hu and Jacob Bieker and Xiuyu Li and Nan Jiang and Benjamin Keigwin and Gaurav Ranganath and Kurt Keutzer and Shriyash Kaustubh Upadhyay},
-  year    = {2024},
-  journal = {arXiv preprint arXiv:2403.12031}
+@misc{li2026llmrouterbench,
+  title        = {LLMRouterBench: A Massive Benchmark and Unified Framework for LLM Routing},
+  author       = {Yun Li and others},
+  year         = {2026},
+  howpublished = {\url{https://github.com/ynulihao/LLMRouterBench}},
+  note         = {Findings of ACL 2026}
 }
-```
