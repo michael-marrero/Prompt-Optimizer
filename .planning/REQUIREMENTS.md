@@ -134,73 +134,72 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| ROUTER-01 | TBD | Pending |
-| ROUTER-02 | TBD | Pending |
-| ROUTER-03 | TBD | Pending |
-| ROUTER-04 | TBD | Pending |
-| ROUTER-05 | TBD | Pending |
-| ROUTER-06 | TBD | Pending |
-| ROUTER-07 | TBD | Pending |
-| BACKEND-01 | TBD | Pending |
-| BACKEND-02 | TBD | Pending |
-| BACKEND-03 | TBD | Pending |
-| BACKEND-04 | TBD | Pending |
-| BACKEND-05 | TBD | Pending |
-| BACKEND-06 | TBD | Pending |
-| BACKEND-07 | TBD | Pending |
-| BACKEND-08 | TBD | Pending |
-| BACKEND-09 | TBD | Pending |
-| API-01 | TBD | Pending |
-| API-02 | TBD | Pending |
-| API-03 | TBD | Pending |
-| API-04 | TBD | Pending |
-| API-05 | TBD | Pending |
-| API-06 | TBD | Pending |
-| API-07 | TBD | Pending |
-| API-08 | TBD | Pending |
-| UI-01 | TBD | Pending |
-| UI-02 | TBD | Pending |
-| UI-03 | TBD | Pending |
-| UI-04 | TBD | Pending |
-| UI-05 | TBD | Pending |
-| UI-06 | TBD | Pending |
-| UI-07 | TBD | Pending |
-| UI-08 | TBD | Pending |
-| UI-09 | TBD | Pending |
-| UI-10 | TBD | Pending |
-| UI-11 | TBD | Pending |
-| UI-12 | TBD | Pending |
-| UI-13 | TBD | Pending |
-| UI-14 | TBD | Pending |
-| UI-15 | TBD | Pending |
-| UI-16 | TBD | Pending |
-| UI-17 | TBD | Pending |
-| STORE-01 | TBD | Pending |
-| STORE-02 | TBD | Pending |
-| STORE-03 | TBD | Pending |
-| STORE-04 | TBD | Pending |
-| STORE-05 | TBD | Pending |
-| STORE-06 | TBD | Pending |
-| SECURE-01 | TBD | Pending |
-| SECURE-02 | TBD | Pending |
-| SECURE-03 | TBD | Pending |
-| SECURE-04 | TBD | Pending |
-| SECURE-05 | TBD | Pending |
-| SECURE-06 | TBD | Pending |
-| OSS-01 | TBD | Pending |
-| OSS-02 | TBD | Pending |
-| OSS-03 | TBD | Pending |
-| OSS-04 | TBD | Pending |
-| OSS-05 | TBD | Pending |
-| OSS-06 | TBD | Pending |
-| OSS-07 | TBD | Pending |
-| OSS-08 | TBD | Pending |
+| ROUTER-01 | Phase 1 | Pending |
+| ROUTER-02 | Phase 1 | Pending |
+| ROUTER-03 | Phase 1 | Pending |
+| ROUTER-04 | Phase 1 | Pending |
+| ROUTER-05 | Phase 1 | Pending |
+| ROUTER-06 | Phase 1 | Pending |
+| ROUTER-07 | Phase 1 | Pending |
+| BACKEND-01 | Phase 2 | Pending |
+| BACKEND-02 | Phase 2 | Pending |
+| BACKEND-03 | Phase 2 | Pending |
+| BACKEND-04 | Phase 2 | Pending |
+| BACKEND-05 | Phase 2 | Pending |
+| BACKEND-06 | Phase 2 | Pending |
+| BACKEND-07 | Phase 2 | Pending |
+| BACKEND-08 | Phase 2 | Pending |
+| BACKEND-09 | Phase 2 | Pending |
+| API-01 | Phase 3 | Pending |
+| API-02 | Phase 3 | Pending |
+| API-03 | Phase 3 | Pending |
+| API-04 | Phase 3 | Pending |
+| API-05 | Phase 3 | Pending |
+| API-06 | Phase 3 | Pending |
+| API-07 | Phase 3 | Pending |
+| API-08 | Phase 3 | Pending |
+| UI-01 | Phase 4 | Pending |
+| UI-02 | Phase 5 | Pending |
+| UI-03 | Phase 4 | Pending |
+| UI-04 | Phase 4 | Pending |
+| UI-05 | Phase 5 | Pending |
+| UI-06 | Phase 4 | Pending |
+| UI-07 | Phase 4 | Pending |
+| UI-08 | Phase 4 | Pending |
+| UI-09 | Phase 5 | Pending |
+| UI-10 | Phase 5 | Pending |
+| UI-11 | Phase 5 | Pending |
+| UI-12 | Phase 5 | Pending |
+| UI-13 | Phase 4 | Pending |
+| UI-14 | Phase 5 | Pending |
+| UI-15 | Phase 5 | Pending |
+| UI-16 | Phase 5 | Pending |
+| UI-17 | Phase 4 | Pending |
+| STORE-01 | Phase 3 | Pending |
+| STORE-02 | Phase 3 | Pending |
+| STORE-03 | Phase 3 | Pending |
+| STORE-04 | Phase 3 | Pending |
+| STORE-05 | Phase 3 | Pending |
+| STORE-06 | Phase 3 | Pending |
+| SECURE-01 | Phase 2 | Pending |
+| SECURE-02 | Phase 2 | Pending |
+| SECURE-03 | Phase 1 | Pending |
+| SECURE-04 | Phase 2 | Pending |
+| SECURE-05 | Phase 2 | Pending |
+| SECURE-06 | Phase 6 | Pending |
+| OSS-01 | Phase 1 | Pending |
+| OSS-02 | Phase 6 | Pending |
+| OSS-03 | Phase 6 | Pending |
+| OSS-04 | Phase 6 | Pending |
+| OSS-05 | Phase 3 | Pending |
+| OSS-06 | Phase 2 | Pending |
+| OSS-07 | Phase 6 | Pending |
+| OSS-08 | Phase 6 | Pending |
 
 **Coverage:**
-- v1 requirements: 60 total
-- Mapped to phases: 0 (filled by roadmapper)
-- Unmapped: 60 ⚠️ (will be reconciled to 0 after roadmap)
+- v1 requirements: 61 total
+- Mapped to phases: 61 / Unmapped: 0 ✓
 
 ---
 *Requirements defined: 2026-05-11*
-*Last updated: 2026-05-11 after initial definition*
+*Last updated: 2026-05-11 after roadmap creation (traceability filled in)*
