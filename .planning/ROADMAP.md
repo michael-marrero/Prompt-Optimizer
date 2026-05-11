@@ -32,7 +32,15 @@ Decimal phases appear between their surrounding integers in numeric order.
   4. Sub-threshold prompts (max-class probability below the configured uncertainty cutoff) deterministically route to the configured fallback model and emit `rationale` containing "low confidence — fallback"; unit test in `src/routing/tests/` proves this.
   5. `uv sync` against the new root `pyproject.toml` + `uv.lock` produces a working environment that can run all Phase 1 commands; the new `.gitignore` already excludes `.env`, `*.db`, `*.db-journal`, `*.db-wal`, `__pycache__/`, `.venv/`, and `chat.db` from this phase's first commit.
 
-**Plans**: TBD
+**Plans**: 8 plans
+- [ ] 01-01-PLAN.md — Wave 0: Toolchain bootstrap (uv + pyproject.toml + uv.lock + .gitignore + pytest scaffolding + CI workflow) — OSS-01, SECURE-03
+- [ ] 01-02-PLAN.md — Wave 1: Extend PromptFeatureExtractor with 5 agentic features + lift text_inputs.py from duplicate sites — ROUTER-01 prep
+- [ ] 01-03-PLAN.md — Wave 1: Build agentic-intent dataset (seeds + LLM-synthesized + LLMRouterBench-mined negatives -> 1,000-row balanced CSV) — ROUTER-01 prep
+- [ ] 01-04-PLAN.md — Wave 2: Train calibrated agentic-intent classifier -> models/agentic_intent_classifier.joblib — ROUTER-01
+- [ ] 01-05-PLAN.md — Wave 2: Backup originals, add unknown class to build_question_type, calibrate task_type + model_router with FrozenEstimator, snapshot baselines.json — ROUTER-02 + ROUTER-03
+- [ ] 01-06-PLAN.md — Wave 3: Build src/routing/ package (schema, config, policy, decide, __main__) + smoke tests for D-18 import-graph guard + Success Criterion #4 — ROUTER-05 + ROUTER-06
+- [ ] 01-07-PLAN.md — Wave 4: Author ~42-row canary CSV + evaluate_routing.py runner + canary schema tests — ROUTER-04
+- [ ] 01-08-PLAN.md — Wave 4: Wire demo_router.py to call src.routing.decide + artifact-compat regression guard + benchmark-no-regression guard — ROUTER-07
 
 ### Phase 2: Backend Adapters & ChatChunk Contract
 **Goal**: Three backend adapters (OpenRouter, Claude Code, computer-use) each implement the `BackendAdapter` Protocol and stream a single `ChatChunk` discriminated union. Per-turn cost caps, per-iteration step caps, key redaction, computer-use opt-in, and the `claude-agent-sdk` SDK pin are all enforced from the adapter layer — no UI yet.
@@ -108,7 +116,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Router Brain Foundation | 0/TBD | Not started | - |
+| 1. Router Brain Foundation | 0/8 | Planning complete | - |
 | 2. Backend Adapters & ChatChunk Contract | 0/TBD | Not started | - |
 | 3. FastAPI Service & Persistent Storage | 0/TBD | Not started | - |
 | 4. Minimal Chat UI (OpenRouter Backend) | 0/TBD | Not started | - |
