@@ -1,6 +1,7 @@
 import os
 import sys
 import joblib
+import time
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
@@ -602,19 +603,24 @@ def train_embedding_router(df: pd.DataFrame, force_rebuild_embeddings: bool = Fa
         stratify=y,
     )
 
-    clf_type = "logistic_multinomial"
+    clf_type = "logistic_multinomial_lbfgs"
+    # L-BFGS multinomial fits dense ~10k–50k × few-hundred-dim inputs much faster
+    # than SAGA, which can appear stuck here.
     model = LogisticRegression(
-        max_iter=8000,
+        max_iter=2000,
         class_weight="balanced",
-        solver="saga",
-        tol=5e-4,
+        solver="lbfgs",
         C=4.0,
         random_state=42,
-        n_jobs=-1,
     )
 
-    print(f"\nTraining embedding router ({clf_type})...")
+    print(
+        f"\nTraining embedding router ({clf_type}) on "
+        f"{X_train.shape[0]:,} × {X_train.shape[1]} matrix..."
+    )
+    t_fit = time.perf_counter()
     model.fit(X_train, y_train)
+    print(f"Classifier fit finished in {time.perf_counter() - t_fit:.2f}s.")
 
     y_pred = model.predict(X_test)
 
@@ -732,7 +738,7 @@ def main():
     print("This experiment uses only origin_query semantic embeddings.")
     print("It does not use the task classifier, handcrafted features, TF-IDF, or top-model grouping.")
     print("Target: best_model_family (coarse vendor bucket)")
-    print("Classifier: multinomial LogisticRegression on L2-normalized embeddings")
+    print("Classifier: multinomial LogisticRegression (L-BFGS) on L2-normalized embeddings")
     print("\nType 'train' to train and save a new embedding router.")
     print("Type 'load' to load the existing saved embedding router.")
 
