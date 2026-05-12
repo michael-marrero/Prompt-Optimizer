@@ -1,0 +1,35 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+.pytest_cache/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Environment / secrets
+.env
+.env.local
+.env.*.local
+
+# Local databases (Phase 3 lands these; this list is forward-compatible per SECURE-03)
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+chat.db
+
+# IDE
+.idea/
+.vscode/
+
+# macOS
+.DS_Store
+
+# Already-committed paths to LEAVE alone
+# (this file does NOT exclude data_processed/, models/, evaluation/ — those are LFS-tracked)

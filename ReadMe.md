@@ -485,6 +485,14 @@ Some benchmark model names do not directly map to current OpenRouter model route
 
 ## Running the Project
 
+### 0. (Recommended) Sync the project environment with uv
+
+```bash
+uv sync --all-extras
+```
+
+This creates `.venv/`, installs every dependency pinned in `uv.lock`, and lets you prefix any command below with `uv run ` (e.g. `uv run python src/demo/demo_router.py`). The existing `pip install ...` instructions in the Requirements section below still work — `uv sync` is the new recommended path.
+
 ### 1. Flatten raw benchmark JSON files
 
 ```bash
