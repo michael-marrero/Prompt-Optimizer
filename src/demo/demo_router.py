@@ -26,6 +26,7 @@ if SRC_DIR not in sys.path:
     sys.path.append(SRC_DIR)
 
 from Feature_extractor import PromptFeatureExtractor
+from src.feature_extraction.text_inputs import build_router_text_input_single
 
 
 # ------------------------------------------------------------
@@ -107,28 +108,6 @@ def build_numeric_features(
     return feature_df
 
 
-def build_model_router_text_input(
-    prompt: str,
-    question_type: str,
-    keyword_question_type: str = "unknown"
-) -> pd.Series:
-    """
-    Match the text format used during model router training.
-
-    This should match build_text_input() from train_model_router.py.
-    """
-
-    combined_text = (
-        str(prompt)
-        + " task_type_"
-        + str(question_type)
-        + " keyword_type_"
-        + str(keyword_question_type)
-    )
-
-    return pd.Series([combined_text])
-
-
 # ------------------------------------------------------------
 # Stage 1: Task classifier
 # ------------------------------------------------------------
@@ -201,7 +180,7 @@ def predict_best_model(
     feature_columns = model_router_artifacts["feature_columns"]
 
     text_features = vectorizer.transform(
-        build_model_router_text_input(
+        build_router_text_input_single(
             prompt=prompt,
             question_type=question_type
         )

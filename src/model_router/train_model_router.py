@@ -20,6 +20,8 @@ from sklearn.metrics import (
 from sklearn.preprocessing import LabelEncoder, StandardScaler
 from sklearn.pipeline import FeatureUnion
 
+from src.feature_extraction.text_inputs import build_router_text_input_series
+
 
 # ------------------------------------------------------------
 # Path setup
@@ -120,39 +122,6 @@ def get_numeric_feature_columns(df: pd.DataFrame, target_column: str) -> list:
                 feature_columns.append(col)
 
     return feature_columns
-
-
-def build_text_input(df: pd.DataFrame) -> pd.Series:
-    """
-    Combine original prompt text with Stage 1 labels.
-
-    This lets the router learn from:
-    - raw query wording
-    - classifier-generated question type
-    - old keyword question type, if available
-    """
-
-    origin_query = df["origin_query"].fillna("").astype(str)
-
-    if "question_type" in df.columns:
-        question_type = df["question_type"].fillna("unknown").astype(str)
-    else:
-        question_type = pd.Series(["unknown"] * len(df), index=df.index)
-
-    if "keyword_question_type" in df.columns:
-        keyword_question_type = df["keyword_question_type"].fillna("unknown").astype(str)
-    else:
-        keyword_question_type = pd.Series(["unknown"] * len(df), index=df.index)
-
-    combined_text = (
-        origin_query
-        + " task_type_"
-        + question_type
-        + " keyword_type_"
-        + keyword_question_type
-    )
-
-    return combined_text
 
 
 # ------------------------------------------------------------
@@ -459,7 +428,7 @@ def predict_user_input(
         "question_type_confidence": question_type_confidence,
     }])
 
-    text_data = build_text_input(input_df)
+    text_data = build_router_text_input_series(input_df)
 
     numeric_df = pd.DataFrame([{col: 0 for col in feature_columns}])
 
@@ -524,7 +493,7 @@ def train_model_router(df: pd.DataFrame):
     print(feature_columns)
     print(f"\nTotal numeric router features: {len(feature_columns)}")
 
-    text_data = build_text_input(df)
+    text_data = build_router_text_input_series(df)
     numeric_features = df[feature_columns].fillna(0)
     labels = df[target_column].fillna("unknown").astype(str)
 
