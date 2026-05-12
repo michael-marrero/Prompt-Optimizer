@@ -106,6 +106,7 @@ class PromptFeatureExtractor:
         features.update(self._keyword_features(text))
         features.update(self._complexity_features(text))
         features.update(self._constraint_features(text))
+        features.update(self._agentic_features(text))
         return features
 
     def _basic_text_features(self, text: str) -> dict:
@@ -358,4 +359,68 @@ class PromptFeatureExtractor:
             "has_constraints": 1 if has_constraints else 0,
             "has_negative_constraint": 1 if has_negative_constraint else 0,
             "has_format_requirement": 1 if has_format_requirement else 0,
+        }
+
+    def _agentic_features(self, text: str) -> dict:
+        """
+        Agentic-intent surface features (Plan 01-02, CONTEXT D-08).
+
+        Returns 5 keys that signal whether the prompt is asking an agent to
+        DO something (build / browse / fill / scrape / click) rather than to
+        produce conversational text.
+
+        Returns
+        -------
+        - imperative_verb_count : int, count of sentences whose first word is
+          one of the 26 locked imperative verbs (RESEARCH §Pattern 3 lines 472-478).
+        - has_url : int (0|1), presence of an http:// or https:// URL.
+        - has_file_path : int (0|1), presence of a Unix /-rooted path or
+          Windows ``C:\\`` drive-letter prefix.
+        - has_code_fence : int (0|1), presence of a triple-backtick fence.
+        - has_action_keyword : int (0|1), presence of any of the 7 locked
+          action keywords (RESEARCH §Pattern 3 line 491).
+
+        Security
+        --------
+        Input is truncated to 50_000 characters before any regex call to
+        bound regex-DoS risk (RESEARCH §Security line 1231, threat T-01-FE-1).
+        The URL pattern uses a single non-backtracking quantifier; the file
+        path pattern bounds each segment to non-slash non-space chars.
+        """
+        # ReDoS mitigation: bound input length BEFORE any regex matches.
+        text = text[:50_000]
+        text_lower = text.lower()
+
+        # Locked imperative-verb set per CONTEXT D-08 + RESEARCH lines 472-478.
+        imperative_verbs = {
+            "build", "make", "create", "write", "edit", "refactor", "fix",
+            "implement", "add", "remove", "delete", "update", "rewrite",
+            "open", "browse", "click", "navigate", "visit", "fill", "submit",
+            "scrape", "fetch", "download", "install", "run",
+        }
+
+        _ensure_nltk_sentence_tokenizer()
+        imperative_verb_count = 0
+        for sentence in sent_tokenize(text):
+            tokens = sentence.strip().split()
+            if tokens and tokens[0].lower() in imperative_verbs:
+                imperative_verb_count += 1
+
+        # Simple, non-backtracking patterns.
+        has_url = 1 if re.search(r"https?://\S+", text) else 0
+        has_file_path = 1 if re.search(r"(/[^\s/]+)+|[A-Za-z]:\\\\", text) else 0
+        has_code_fence = 1 if "```" in text else 0
+
+        # Locked action-keyword set per RESEARCH line 491.
+        action_keywords = (
+            "build", "open", "scrape", "fill", "click", "edit", "refactor",
+        )
+        has_action_keyword = 1 if any(kw in text_lower for kw in action_keywords) else 0
+
+        return {
+            "imperative_verb_count": imperative_verb_count,
+            "has_url": has_url,
+            "has_file_path": has_file_path,
+            "has_code_fence": has_code_fence,
+            "has_action_keyword": has_action_keyword,
         }
