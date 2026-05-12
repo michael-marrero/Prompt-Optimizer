@@ -73,14 +73,14 @@ Requirements for the auto-routing chat milestone. Each maps to a roadmap phase.
 
 - [ ] **SECURE-01**: Python logging configured with a redaction filter that strips `sk-…`, `sk-ant-…`, `Bearer \S+` from any log record before it reaches a handler
 - [ ] **SECURE-02**: Pre-commit hook greps staged content for `sk-` and `sk-ant-` prefixes and blocks the commit if found
-- [ ] **SECURE-03**: Root `.gitignore` excludes `.env`, `*.db`, `*.db-journal`, `*.db-wal`, `__pycache__/`, `.venv/`, `chat.db` from the first commit that touches key handling
+- [x] **SECURE-03**: Root `.gitignore` excludes `.env`, `*.db`, `*.db-journal`, `*.db-wal`, `__pycache__/`, `.venv/`, `chat.db` from the first commit that touches key handling
 - [ ] **SECURE-04**: BYOK keys live only in process memory + an OS keyring entry (via `keyring`) if the user opts in; never written to SQLite, JSON, or log files
 - [ ] **SECURE-05**: Computer-use is OFF by default; setting `COMPUTER_USE_OPT_IN=1` (env or settings panel) is required to enable it
 - [ ] **SECURE-06**: README documents the computer-use threat model (prompt injection from visited pages, runaway cost, workspace exfiltration) and the per-thread ephemeral workspace defaults
 
 ### Open-Source Distribution
 
-- [ ] **OSS-01**: Root `pyproject.toml` + `uv.lock` replace the missing requirements lockfile; `uv sync` produces a working environment
+- [x] **OSS-01**: Root `pyproject.toml` + `uv.lock` replace the missing requirements lockfile; `uv sync` produces a working environment
 - [ ] **OSS-02**: `make setup` (or `scripts/setup.sh`) runs `git lfs pull`, downloads NLTK `punkt_tab`, pre-fetches the SentenceTransformer model, and copies `.env.example` → `.env` if absent
 - [ ] **OSS-03**: `.env.example` enumerates every key the app reads with one-line comments
 - [ ] **OSS-04**: README rewritten — three golden-path demo prompts ("build me a finance app" → Claude Code; "what's the capital of France?" → cheap chat model; "open this URL and check the price" → computer-use), screenshots, quickstart that works from a clean clone
@@ -183,11 +183,11 @@ Which phases cover which requirements. Updated during roadmap creation.
 | STORE-06 | Phase 3 | Pending |
 | SECURE-01 | Phase 2 | Pending |
 | SECURE-02 | Phase 2 | Pending |
-| SECURE-03 | Phase 1 | Pending |
+| SECURE-03 | Phase 1 | Complete |
 | SECURE-04 | Phase 2 | Pending |
 | SECURE-05 | Phase 2 | Pending |
 | SECURE-06 | Phase 6 | Pending |
-| OSS-01 | Phase 1 | Pending |
+| OSS-01 | Phase 1 | Complete |
 | OSS-02 | Phase 6 | Pending |
 | OSS-03 | Phase 6 | Pending |
 | OSS-04 | Phase 6 | Pending |
