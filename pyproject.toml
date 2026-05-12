@@ -35,4 +35,7 @@ packages = ["src"]
 [tool.pytest.ini_options]
 testpaths = ["src"]
 python_files = ["test_*.py"]
-addopts = "-x -q"
+# importlib mode keeps each src/<package>/tests/ directory in its own
+# import namespace; otherwise the duplicate bare "tests" package names
+# collide in sys.modules during collection.
+addopts = "-x -q --import-mode=importlib"
