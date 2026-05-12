@@ -1,0 +1,38 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout (with LFS for data_processed/*.csv)
+        uses: actions/checkout@v4
+        with:
+          lfs: true
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          enable-cache: true
+
+      - name: Install Python 3.11
+        run: uv python install 3.11
+
+      - name: Sync dependencies (locked)
+        run: uv sync --locked --all-extras --dev
+
+      - name: Pre-fetch NLTK data (Pitfall 5 mitigation)
+        run: |
+          uv run python -c "import nltk; nltk.download('punkt_tab', quiet=True); nltk.download('punkt', quiet=True)"
+
+      - name: Run full pytest suite
+        run: uv run pytest -x -q
+
+      - name: Routing canary eval (no-op until Plan 07 lands the canary CSV)
+        if: ${{ hashFiles('data_processed/routing_decision_eval.csv') != '' }}
+        continue-on-error: false
+        run: uv run python -m src.evaluation.evaluate_routing --check
