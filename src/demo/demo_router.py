@@ -34,6 +34,7 @@ from src.feature_extraction.text_inputs import build_router_text_input_single
 # (input loop + print_route_result) is preserved verbatim for backward
 # compatibility; internally the brain emits a RoutingDecision that we
 # adapt back into the legacy dict shape print_route_result consumes.
+from src.routing.config import FALLBACK_MODEL_OR_AGENT
 from src.routing.decide import decide
 from src.routing.schema import RoutingDecision
 
@@ -336,7 +337,25 @@ def _decision_to_legacy_dict(
         # For fallback (low-confidence + unverified-slug branches) this
         # reflects the brain's decision rather than the raw slug's
         # api_model from model_mapping.json (which may be null).
+        #
+        # WR-01 fix: When the brain substitutes the slug's api_model (e.g.,
+        # because choose_final_route returned a null api_model for an
+        # unverified-but-mapped slug like internlm3-8b-instruct, and
+        # decide() fell through to FALLBACK_MODEL_OR_AGENT), the legacy
+        # display would still show the slug's stale openrouter_verified=False
+        # and source="model_router". Re-derive both fields from the
+        # openrouter/auto mapping entry so the displayed route metadata
+        # is consistent with the api_model the brain actually picked.
         final_model_info = dict(final_model_info)
+        if (
+            final_model_info.get("api_model") != decision.model_or_agent
+            and decision.model_or_agent == FALLBACK_MODEL_OR_AGENT
+        ):
+            auto_entry = model_mapping.get("openrouter", {})
+            final_model_info["openrouter_verified"] = bool(
+                auto_entry.get("openrouter_verified", False)
+            )
+            final_model_info["source"] = "unverified_slug_fallback_to_auto"
         final_model_info["api_model"] = decision.model_or_agent
 
     else:
