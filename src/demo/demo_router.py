@@ -289,7 +289,7 @@ def get_api_model_for_real_call(final_model_info: dict):
 def _decision_to_legacy_dict(
     decision: RoutingDecision,
     prompt: str,
-    model_mapping: dict,
+    artifacts: dict,
 ) -> dict:
     """
     Adapt a RoutingDecision (produced by `src.routing.decide.decide`) into
@@ -302,6 +302,13 @@ def _decision_to_legacy_dict(
     is no model_router prediction — we synthesize sensible defaults so
     `print_route_result` never crashes on a missing key.
 
+    WR-06 fix: take the full `artifacts` dict (4-key shape: task,
+    agentic, model_router, model_mapping) instead of a parallel
+    `model_mapping` argument. This guarantees the demo adapter resolves
+    route metadata against the SAME mapping the brain used inside
+    decide() — eliminates the fragile assumption that the demo's view of
+    model_mapping matches the brain's view.
+
     Output keys (matches the original route_prompt return shape):
       prompt
       question_type, question_type_confidence, task_predictions
@@ -309,6 +316,10 @@ def _decision_to_legacy_dict(
       final_model_info, api_model_for_real_call
       routing_decision  # NEW — the structured decision for future UI surfaces
     """
+
+    # Source the mapping from the same artifacts dict the brain consumed
+    # (WR-06). KeyError if absent — fail loud rather than fall back to {}.
+    model_mapping = artifacts["model_mapping"]
 
     signals = decision.signals or {}
 
@@ -451,17 +462,18 @@ def route_prompt(
             "agentic_intent_classifier.joblib",
         )
 
-    decision = decide(
-        prompt=prompt,
-        artifacts={
-            "task_type_classifier": task_artifacts,
-            "model_router": model_router_artifacts,
-            "agentic_intent_classifier": agentic_intent_artifacts,
-            "model_mapping": model_mapping,
-        },
-    )
+    artifacts = {
+        "task_type_classifier": task_artifacts,
+        "model_router": model_router_artifacts,
+        "agentic_intent_classifier": agentic_intent_artifacts,
+        "model_mapping": model_mapping,
+    }
 
-    return _decision_to_legacy_dict(decision, prompt, model_mapping)
+    decision = decide(prompt=prompt, artifacts=artifacts)
+
+    # WR-06 fix: pass the same artifacts dict the brain consumed so the
+    # adapter resolves route metadata against the same model_mapping.
+    return _decision_to_legacy_dict(decision, prompt, artifacts)
 
 
 # ------------------------------------------------------------
