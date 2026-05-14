@@ -115,8 +115,30 @@ def decide_backend(
     is_coding_task = task_type in coding_task_types
 
     # ------------------------------------------------------------------
-    # Branch 1 — agentic + (coding/instruction-following OR build kw)
+    # Branch ordering note (Rule 2 deviation from D-01 literal `elif`):
+    #
+    # D-01 spells the cascade as `if claude_code elif computer_use`,
+    # which is first-match-wins on coding-task. In practice the
+    # calibrated task-type classifier sometimes mis-classifies short
+    # browse prompts (e.g. "open https://x.com and click subscribe")
+    # as `coding` because URL tokens and short imperative verbs
+    # overlap with the LLMRouterBench coding distribution. CONTEXT D-15
+    # "Informational-URL" edge case explicitly says
+    # `URL + action verb -> computer-use`, so when BOTH branches could
+    # match we prefer the more specific browse-keyword branch.
+    #
+    # Concretely, the cascade is:
+    #   1. agentic + browse_keyword -> computer_use  (most specific)
+    #   2. agentic + (coding-task OR build_keyword) -> claude_code
+    #   3. otherwise -> openrouter
     # ------------------------------------------------------------------
+
+    # Branch 1 — agentic + browse keyword (most specific)
+    if agentic_intent and has_browse_keyword:
+        reason = "agentic + browse/interact keyword -> computer-use"
+        return ("computer_use", computer_use_sentinel, reason)
+
+    # Branch 2 — agentic + (coding/instruction-following OR build kw)
     if agentic_intent and (is_coding_task or has_build_keyword):
         if is_coding_task and has_build_keyword:
             reason = "agentic + coding task + build keyword -> Claude Code"
@@ -125,13 +147,6 @@ def decide_backend(
         else:
             reason = "agentic + build/edit keyword -> Claude Code"
         return ("claude_code", claude_code_sentinel, reason)
-
-    # ------------------------------------------------------------------
-    # Branch 2 — agentic + browse/click keywords
-    # ------------------------------------------------------------------
-    if agentic_intent and has_browse_keyword:
-        reason = "agentic + browse/interact keyword -> computer-use"
-        return ("computer_use", computer_use_sentinel, reason)
 
     # ------------------------------------------------------------------
     # Branch 3 — everything else (conversational OR agentic-but-no-
