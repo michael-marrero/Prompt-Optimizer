@@ -56,6 +56,13 @@ MODEL_ROUTER_BACKUP = UNCALIBRATED_DIR / "model_router.joblib"
 TASK_TYPE_CSV = DATA_PROCESSED_DIR / "classifier_training_with_types.csv"
 MODEL_ROUTER_CSV = DATA_PROCESSED_DIR / "router_training_dataset_top_models.csv"
 
+# WR-08 fix: sidecar metadata written by scripts/inject_unknown_class_rows.py
+# Read here to record provenance ("includes_unknown_class": True/False)
+# in baselines.json so an unexpected ordering of the pipeline (e.g., the
+# operator ran inject before snapshot) is visible at snapshot time
+# rather than silently changing the baseline.
+TASK_TYPE_CSV_META = DATA_PROCESSED_DIR / "classifier_training_with_types.meta.json"
+
 # Set up sys.path so we can load the centralized text-input helper.
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
@@ -78,6 +85,44 @@ def _setup_logging(verbosity: int) -> None:
         format="%(asctime)s | %(levelname)-7s | %(message)s",
         datefmt="%H:%M:%S",
     )
+
+
+# ------------------------------------------------------------
+# Provenance sidecar reader (WR-08 fix)
+#
+# Reads the optional classifier_training_with_types.meta.json written by
+# scripts/inject_unknown_class_rows.py. Returns a dict suitable for
+# recording in baselines.json. If the sidecar is missing, returns
+# {"includes_unknown_class": False, "sidecar_present": False} so the
+# absence is captured explicitly rather than assumed.
+# ------------------------------------------------------------
+
+def _read_provenance_sidecar(meta_path: Path) -> dict:
+    """Read the inject_unknown_class_rows.py sidecar metadata or return
+    a stub if absent. Never raises — provenance is best-effort.
+    """
+    if not meta_path.exists():
+        return {
+            "sidecar_present": False,
+            "includes_unknown_class": False,
+            "sidecar_path": str(meta_path),
+        }
+    try:
+        with meta_path.open("r", encoding="utf-8") as fp:
+            meta = json.load(fp)
+    except (OSError, json.JSONDecodeError) as exc:
+        logging.warning(
+            "Failed to read provenance sidecar at %s: %s", meta_path, exc
+        )
+        return {
+            "sidecar_present": False,
+            "includes_unknown_class": False,
+            "sidecar_path": str(meta_path),
+            "read_error": str(exc),
+        }
+    meta["sidecar_present"] = True
+    meta["sidecar_path"] = str(meta_path)
+    return meta
 
 
 # ------------------------------------------------------------
@@ -369,6 +414,12 @@ def main(argv: list[str] | None = None) -> int:
     model_router_metrics = _score_model_router(args.model_router_artifact, args.model_router_csv)
     logging.info("model_router metrics: %s", model_router_metrics)
 
+    # WR-08 fix: capture sidecar metadata provenance for the task-type CSV.
+    # If the sidecar is missing, record includes_unknown_class=False so
+    # the absence is recorded (not assumed). This lets test_no_regression
+    # confirm the baseline was captured against the expected input.
+    csv_provenance = _read_provenance_sidecar(TASK_TYPE_CSV_META)
+
     snapshot = {
         "schema_version": 1,
         "snapshot_date": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
@@ -379,6 +430,7 @@ def main(argv: list[str] | None = None) -> int:
             "(random_state=42) using only the feature_columns saved in the artifact. "
             "ECE is computed on max-class probability with 10 uniform bins."
         ),
+        "task_type_csv_provenance": csv_provenance,
         "task_type_classifier": task_type_metrics,
         "model_router": model_router_metrics,
     }

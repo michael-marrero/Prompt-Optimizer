@@ -85,6 +85,12 @@ UNCAL_MODEL_ROUTER_PATH = UNCALIBRATED_DIR / "model_router.joblib"
 TASK_TYPE_CSV = DATA_PROCESSED_DIR / "classifier_training_with_types.csv"
 MODEL_ROUTER_CSV = DATA_PROCESSED_DIR / "router_training_dataset_top_models.csv"
 
+# WR-08 fix: provenance sidecar for the task-type CSV. Written by
+# scripts/inject_unknown_class_rows.py; read by snapshot_baselines.py
+# and this test to confirm the baseline was captured against the
+# expected input shape (with vs without injected unknown class rows).
+TASK_TYPE_CSV_META = DATA_PROCESSED_DIR / "classifier_training_with_types.meta.json"
+
 # Asymmetric tolerances (Plan 05 SUMMARY carry-forward + Plan 07 doc).
 ACCURACY_REGRESSION_TOLERANCE: float = 0.02   # regression must be <= this; improvements pass
 MACRO_F1_REGRESSION_TOLERANCE: float = 0.02
@@ -285,6 +291,41 @@ def _load_baseline_or_skip() -> dict:
 # ----------------------------------------------------------------------
 # Tests
 # ----------------------------------------------------------------------
+
+
+def test_task_type_csv_provenance_consistent() -> None:
+    """WR-08: baselines.json and the on-disk task-type CSV must agree on
+    whether the synthetic unknown-class rows have been injected.
+
+    The classifier_training_with_types.meta.json sidecar is written by
+    scripts/inject_unknown_class_rows.py and read by
+    snapshot_baselines.py. If both files exist, the
+    `includes_unknown_class` flag must match between the baseline
+    snapshot and the current sidecar — otherwise the snapshot was
+    captured against a different input shape than the test is now
+    scoring, which would silently produce false regressions.
+
+    Skipped when either file is missing (fresh checkout / Plan 05 not
+    yet run).
+    """
+    baseline = _load_baseline_or_skip()
+    _require(TASK_TYPE_CSV_META, "Plan 05 Task 3 (inject_unknown_class_rows.py)")
+
+    with TASK_TYPE_CSV_META.open("r", encoding="utf-8") as fp:
+        sidecar = json.load(fp)
+
+    sidecar_flag = bool(sidecar.get("includes_unknown_class", False))
+    baseline_provenance = baseline.get("task_type_csv_provenance") or {}
+    baseline_flag = bool(baseline_provenance.get("includes_unknown_class", False))
+
+    assert sidecar_flag == baseline_flag, (
+        f"Provenance mismatch: classifier_training_with_types.meta.json says "
+        f"includes_unknown_class={sidecar_flag} but baselines.json says "
+        f"task_type_csv_provenance.includes_unknown_class={baseline_flag}. "
+        "Re-run scripts/inject_unknown_class_rows.py then "
+        "src/evaluation/snapshot_baselines.py to refresh the snapshot, "
+        "or roll back the CSV so both files agree."
+    )
 
 
 def test_baselines_json_present() -> None:

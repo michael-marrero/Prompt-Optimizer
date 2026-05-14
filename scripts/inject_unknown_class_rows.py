@@ -25,7 +25,9 @@ never accumulates duplicates.
 
 from __future__ import annotations
 
+import json
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
 import pandas as pd
@@ -34,6 +36,12 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 DATA_DIR = PROJECT_ROOT / "data_processed"
 INPUT_CSV = DATA_DIR / "classifier_training_with_types.csv"
 OUTPUT_CSV = INPUT_CSV  # in-place
+
+# WR-08 fix: sidecar metadata sentinel so downstream consumers
+# (snapshot_baselines.py, test_no_regression) can confirm whether the
+# CSV they're reading includes the 50 injected synthetic OOD rows.
+# Without this, both scripts had to guess from the operator's run order.
+META_JSON = DATA_DIR / "classifier_training_with_types.meta.json"
 
 SRC_FEATURE_EXTRACTION = PROJECT_ROOT / "src" / "feature_extraction"
 if str(SRC_FEATURE_EXTRACTION) not in sys.path:
@@ -199,8 +207,24 @@ def main() -> int:
     out = pd.concat([df, ood_df], axis=0).reset_index(drop=True)
     out.to_csv(OUTPUT_CSV, index=False)
 
+    # WR-08 fix: write the sidecar metadata sentinel so downstream
+    # snapshot_baselines.py and test_no_regression can confirm
+    # the CSV they read includes the injected unknown class rows.
+    meta = {
+        "includes_unknown_class": True,
+        "injected_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "n_injected_ood_rows": int(n),
+        "synthetic_dataset_prefix": "synthetic_ood_",
+        "source_csv": OUTPUT_CSV.name,
+        "schema_version": 1,
+    }
+    with META_JSON.open("w", encoding="utf-8") as fp:
+        json.dump(meta, fp, indent=2, sort_keys=False)
+        fp.write("\n")
+
     print(f"\nAppended {n} synthetic OOD rows.")
     print(f"  new total rows: {len(out)} (was {original_rows})")
+    print(f"  wrote provenance sidecar: {META_JSON}")
 
     # Verification report (matches plan's Task 3 acceptance criteria).
     qts = out["question_type"].value_counts()
