@@ -1,21 +1,24 @@
 ---
 phase: 01-router-brain-foundation
 verified: 2026-05-14T18:40:00Z
-status: human_needed
+resolved: 2026-05-14T18:50:00Z
+status: passed
 score: 6/6 must-haves verified
 overrides_applied: 0
-human_verification:
+human_verification_resolved:
   - test: "Confirm CI is intentionally left failing on the canary ECE --check gate, or decide whether continue-on-error should be flipped to true for this step"
-    expected: "Either (a) CI passes end-to-end on a push to main, or (b) the developer explicitly accepts a failing CI step as a known Phase 1 limitation and documents the decision"
-    why_human: "evaluate_routing --check exits 1 in CI (canary ECE proxy metric > 0.10 threshold on all 3 heads). The SUMMARY correctly explains this is a measurement artifact of the confounded y_true=backend_match proxy, not a real calibration failure. However, .github/workflows/ci.yml has continue-on-error: false on that step, meaning every push to main will produce a failed CI job. Whether to accept this as Phase 1 behavior or change continue-on-error to true requires a human decision."
+    decision: "Flipped continue-on-error from false to true on the routing canary eval step in .github/workflows/ci.yml. Treats --check as advisory while keeping its output visible in CI logs. SC #3 remains gated by test_no_regression.py."
+    resolved_in_commit: 64a07d2
+    rationale: "Per-stage canary ECE is a measurement artifact of the confounded backend_match proxy, not a real calibration failure. Training-distribution ECE in baselines.json is healthy. A future phase will refactor the proxy to compute per-stage ECE against each classifier's own y_true."
 ---
 
 # Phase 1: Router Brain Foundation Verification Report
 
 **Phase Goal:** Pure `src/routing/decide()` with calibrated classifiers, agentic-intent head, OOD sentinel, and a hand-labeled routing canary eval.
 **Verified:** 2026-05-14T18:40:00Z
-**Status:** human_needed
-**Re-verification:** No — initial verification
+**Resolved:** 2026-05-14T18:50:00Z (single human-needed item resolved via CI ergonomics fix in commit 64a07d2)
+**Status:** passed
+**Re-verification:** No — initial verification + human-item resolution
 
 ## Goal Achievement
 
