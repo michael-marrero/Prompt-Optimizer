@@ -1,7 +1,12 @@
 {
   "schema_version": 1,
-  "snapshot_date": "2026-05-14T03:15:58Z",
+  "snapshot_date": "2026-05-14T22:20:02Z",
   "description": "Pre-calibration baseline metrics captured from models/uncalibrated/. Used by Plan 08's regression-guard test (ROUTER-07). Each classifier was scored on its canonical 0.2 stratified test split (random_state=42) using only the feature_columns saved in the artifact. ECE is computed on max-class probability with 10 uniform bins.",
+  "task_type_csv_provenance": {
+    "sidecar_present": false,
+    "includes_unknown_class": false,
+    "sidecar_path": "/Users/michaelmarrero/GitHub/Prompt-Optimizer/data_processed/classifier_training_with_types.meta.json"
+  },
   "task_type_classifier": {
     "accuracy": 0.7814739937511487,
     "macro_f1": 0.7193149169844376,
