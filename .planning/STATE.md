@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Phase 1 Plan 06 complete (ROUTER-05 + ROUTER-06 closed; src/routing/ routing brain + decide() CLI shipped; D-18 import-graph guard runtime-tested); Plan 07 ready
-last_updated: "2026-05-14T15:20:05.230Z"
+stopped_at: Phase 1 Plan 07 complete (ROUTER-04 closed; canary CSV + evaluate_routing.py + D-16 metric stack; --check exits 1 today due to canary-proxy ECE > 0.10, Plan 08 owns recalibration decision)
+last_updated: "2026-05-14T17:09:58.620Z"
 last_activity: 2026-05-14
 progress:
   total_phases: 6
   completed_phases: 0
   total_plans: 8
-  completed_plans: 6
-  percent: 75
+  completed_plans: 7
+  percent: 88
 ---
 
 # Project State
@@ -26,11 +26,11 @@ See: .planning/PROJECT.md (updated 2026-05-11)
 ## Current Position
 
 Phase: 01 (router-brain-foundation) — EXECUTING
-Plan: 7 of 8 (Plans 01–06 complete; advancing to Plan 07)
+Plan: 8 of 8 (Plans 01–06 complete; advancing to Plan 07)
 Status: Ready to execute
 Last activity: 2026-05-14
 
-Progress: [████████░░] 75%
+Progress: [█████████░] 88%
 
 ## Performance Metrics
 
@@ -63,6 +63,7 @@ Progress: [████████░░] 75%
 | Phase 01 P04 | 37m | 2 tasks | 4 files |
 | Phase 01 P05 | 98m | 7 tasks | 9 files |
 | Phase 01 P06 | 51m | 3 tasks | 10 files |
+| Phase 01 P07 | 15m | 4 tasks | 12 files |
 
 ## Accumulated Context
 
@@ -93,6 +94,9 @@ Recent decisions affecting current work:
 - [Phase 01]: Phase 1 Plan 06: fallback rationale suffix is the 25-character locked string "low confidence — fallback" with U+2014 em-dash at index 15. _build_fallback_decision asserts endswith at construction time as belt-and-suspenders for the unit tests. All fallback paths (3 tau gates + V5 empty + V7 try/except wrapper) emit a rationale ending with this suffix.
 - [Phase 01]: Phase 1 Plan 06: D-18 runtime import-graph guard in src/routing/tests/test_decide_smoke.py walks sys.modules after `import src.routing.decide` and asserts none of {fastapi, httpx, requests, aiohttp, anthropic, openai} appear at the top-level-package level. Test passes today; Phase 2 / Phase 3 planners must keep the guard green when adding new imports to src/routing/.
 - [Phase 01]: Phase 1 Plan 06: ROUTER-06 quality_first_pick cost-tiebreaker did NOT fire during CLI smoke testing on canonical prompts (top-1 to top-2 gap >> epsilon=0.02). Plan 07's canary should exercise boundary prompts to confirm the tiebreaker fires when expected; sweeping epsilon ∈ {0.01, 0.02, 0.05, 0.10} via the settings dict will produce the activation-rate histogram.
+- [Phase ?]: Phase 1 Plan 07: routing_decision_eval canary has 42 hand-labeled rows; first end-to-end run gives backend_accuracy=0.9048 (PASS, > 0.65 threshold) but per-stage ECE on canary-proxy y_true (0.42 task_type, 0.14 agentic_intent, 0.44 model_router) all exceed 0.10 — proxy uses backend_match as per-stage truth so NOT directly comparable to Plan 05 training-set ECE. --check exits 1 today; Plan 08 owns the isotonic recalibration decision.
+- [Phase ?]: Phase 1 Plan 07: D-01 cascade mis-routes 4 chat-side prompts (write a haiku, write a Python function for fizzbuzz, show me a one-liner to reverse a string, summarize URL article) to claude_code because 'write' is in BUILD_KEYWORDS AND/OR the calibrated task classifier predicts task=coding on short chat-coding requests. Canary surfaces this as designed (Plan 06 follow-up; Plan 07 is not responsible for the fix). Possible fixes: tighten BUILD_KEYWORDS, raise agentic_intent_tau on the canary slice, or add a chat-snippet vs project-edit feature.
+- [Phase ?]: Phase 1 Plan 07: ROUTER-06 tier_tiebreaker fires 0 of 42 times on canary at default epsilon=0.02 — calibrated model_router produces sharp top-1 predictions on every canary prompt. Boundary-region prompts I added (haiku, fizzbuzz, one-liner) route to claude_code BEFORE the model_router stage runs so they never exercise the tiebreaker. Plan 08 would need a dedicated boundary-region slice (deliberately within epsilon of two equal-tier OpenRouter models) AND a --epsilon CLI flag to exercise this.
 
 ### Pending Todos
 
@@ -115,6 +119,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-05-14T05:55:48Z
-Stopped at: Phase 1 Plan 06 complete (ROUTER-05 + ROUTER-06 closed; src/routing/ routing brain + decide() CLI shipped; D-18 import-graph guard runtime-tested); Plan 07 ready
+Last session: 2026-05-14T17:09:58.610Z
+Stopped at: Phase 1 Plan 07 complete (ROUTER-04 closed; canary CSV + evaluate_routing.py + D-16 metric stack; --check exits 1 today due to canary-proxy ECE > 0.10, Plan 08 owns recalibration decision)
 Resume file: None
