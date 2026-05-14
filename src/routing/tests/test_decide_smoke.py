@@ -21,6 +21,16 @@ import pytest
 
 FORBIDDEN_MODULES: frozenset[str] = frozenset({
     "fastapi", "httpx", "requests", "aiohttp", "anthropic", "openai",
+    # WR-03 fix: match the orchestrator's full D-18 check list. Each of
+    # these is a known HTTP-client / web-framework / LLM-SDK package that
+    # would imply a live API call has leaked into the brain layer.
+    # `google-generativeai` is recorded by its PyPI distribution name so
+    # operators reading FORBIDDEN_MODULES see the canonical name; the
+    # runtime `sys.modules` walk uses `name.split(".")[0]` so the
+    # transitive import name (`google.generativeai` -> top-level `google`)
+    # is not matched by this entry alone — see the dotted-name handling
+    # for genai-specific guards.
+    "urllib3", "flask", "starlette", "pydantic", "google-generativeai",
 })
 
 
