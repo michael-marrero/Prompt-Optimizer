@@ -1,0 +1,52 @@
+{
+  "schema_version": 1,
+  "snapshot_date": "2026-05-14T03:15:58Z",
+  "description": "Pre-calibration baseline metrics captured from models/uncalibrated/. Used by Plan 08's regression-guard test (ROUTER-07). Each classifier was scored on its canonical 0.2 stratified test split (random_state=42) using only the feature_columns saved in the artifact. ECE is computed on max-class probability with 10 uniform bins.",
+  "task_type_classifier": {
+    "accuracy": 0.7814739937511487,
+    "macro_f1": 0.7193149169844376,
+    "weighted_f1": 0.7899430934999779,
+    "ece": 0.11553423837569084,
+    "n_test": 5441,
+    "n_features": 48,
+    "classes": [
+      "agentic",
+      "coding",
+      "emotion",
+      "factual",
+      "general",
+      "knowledge",
+      "math",
+      "medical",
+      "reasoning",
+      "writing"
+    ]
+  },
+  "model_router": {
+    "accuracy": 0.2091527292777063,
+    "macro_f1": 0.17436134928985791,
+    "weighted_f1": 0.21772523341203023,
+    "ece": 0.06336722274329122,
+    "n_test": 5441,
+    "n_features": 49,
+    "target_column": "best_model_top15",
+    "classes": [
+      "MiniCPM4.1-8B",
+      "OTHER",
+      "OpenThinker3-7B",
+      "cogito-v1-preview-llama-8B",
+      "deepseek-v3-0324",
+      "deepseek-v3.1-terminus",
+      "gemini-2.5-flash",
+      "glm-4-9b-chat",
+      "gpt-5",
+      "gpt-5-chat",
+      "granite-3.3-8b-instruct",
+      "internlm3-8b-instruct",
+      "kimi-k2-0905",
+      "openrouter",
+      "qwen3-235b-a22b-2507",
+      "qwen3-235b-a22b-thinking-2507"
+    ]
+  }
+}
