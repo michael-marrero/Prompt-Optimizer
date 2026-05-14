@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Phase 1 Plan 03 complete (agentic_intent_training.csv assembled — ROUTER-01 prep done; Plan 04 ready)
-last_updated: "2026-05-14T03:06:15.396Z"
+stopped_at: Phase 1 Plan 05 complete (ROUTER-02 + ROUTER-03 closed; calibrated heads + unknown OOD class + baselines.json shipped); Plan 06 ready
+last_updated: "2026-05-14T04:50:44.879Z"
 last_activity: 2026-05-14
 progress:
   total_phases: 6
   completed_phases: 0
   total_plans: 8
-  completed_plans: 4
-  percent: 50
+  completed_plans: 5
+  percent: 63
 ---
 
 # Project State
@@ -26,11 +26,11 @@ See: .planning/PROJECT.md (updated 2026-05-11)
 ## Current Position
 
 Phase: 01 (router-brain-foundation) — EXECUTING
-Plan: 5 of 8 (Plans 01, 02, 03 complete; advancing to Plan 04)
+Plan: 6 of 8 (Plans 01, 02, 03 complete; advancing to Plan 04)
 Status: Ready to execute
 Last activity: 2026-05-14
 
-Progress: [█████░░░░░] 50%
+Progress: [██████░░░░] 63%
 
 ## Performance Metrics
 
@@ -61,6 +61,7 @@ Progress: [█████░░░░░] 50%
 
 *Updated after each plan completion*
 | Phase 01 P04 | 37m | 2 tasks | 4 files |
+| Phase 01 P05 | 98m | 7 tasks | 9 files |
 
 ## Accumulated Context
 
@@ -82,6 +83,9 @@ Recent decisions affecting current work:
 - [Phase 01]: Plan 03 Rule 4 deviation: negatives mined from data_processed/classifier_training.csv instead of flat_records.csv (upstream JSON tree absent; classifier_training.csv shares dataset + origin_query columns so the RESEARCH §Pattern 3 Step 4 filter applies verbatim).
 - [Phase 01]: Plan 03 LLM expansion performed by Claude Opus 4.7 via Claude Code on 2026-05-13 (one-time offline per RESEARCH A3); 477 paraphrases embedded verbatim in scripts/expand_agentic_seeds.py for deterministic reproducibility. src/routing/ remains HTTP-library-free.
 - [Phase ?]: Phase 1 Plan 04: agentic-intent classifier calibrated with method=sigmoid via FrozenEstimator+CalibratedClassifierCV; held-out accuracy=0.9505, macro-F1=0.9505, ECE=0.0364. method=isotonic switch is NOT needed (ECE well below 0.10 threshold).
+- [Phase ?]: Phase 1 Plan 05: calibrated task_type_classifier (11 classes incl unknown OOD) and model_router (16 classes) via FrozenEstimator + CalibratedClassifierCV(method=sigmoid); models/uncalibrated/ backup directory established (Pitfall 6); evaluation/baselines.json snapshot captured for Plan 08 regression guard (ROUTER-07).
+- [Phase ?]: Phase 1 Plan 05: 50 synthetic OOD prompts injected as unknown class (LLMRouterBench has 0 organic OOD rows). Final unknown count: 50 of 27253 rows (0.18%), well within Pitfall 2 bounds.
+- [Phase ?]: Phase 1 Plan 05: training-set ECE mildly regressed on both heads (task_type 0.116 -> 0.142; model_router 0.063 -> 0.074). Plan 07 should compute canary-set ECE; if > 0.10 there, switch to method='isotonic' (Open Question 1 escape hatch).
 
 ### Pending Todos
 
@@ -104,6 +108,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-05-14T03:06:11.736Z
-Stopped at: Phase 1 Plan 03 complete (agentic_intent_training.csv assembled — ROUTER-01 prep done; Plan 04 ready)
+Last session: 2026-05-14T04:50:44.870Z
+Stopped at: Phase 1 Plan 05 complete (ROUTER-02 + ROUTER-03 closed; calibrated heads + unknown OOD class + baselines.json shipped); Plan 06 ready
 Resume file: None
