@@ -27,11 +27,11 @@ Every prompt routes to the LLM or agent best suited to deliver a high-quality an
 
 <!-- v1 scope, hypothesis until shipped. -->
 
-- [ ] **Agentic-intent classifier** — new trained binary head that distinguishes conversational prompts ("explain X") from agentic prompts ("build me X", "open this URL and do Y"), feeding the agent-vs-chat decision.
+- [x] **Agentic-intent classifier** — new trained binary head that distinguishes conversational prompts ("explain X") from agentic prompts ("build me X", "open this URL and do Y"), feeding the agent-vs-chat decision. _Validated in Phase 01: `models/agentic_intent_classifier.joblib`, accuracy 0.9554, ECE 0.045, calibrated via FrozenEstimator + CalibratedClassifierCV._
 - [ ] **OpenRouter integration** — live API calls (not simulated metadata) to the chat models referenced in `config/model_mapping.json`, with streaming responses.
 - [ ] **Claude Code SDK integration** — agentic backend invoked when the router decides a task needs file edits / multi-step coding work.
 - [ ] **Anthropic computer-use integration** — agentic backend invoked when the router decides a task needs browser-style action (open URL, fill form, check status).
-- [ ] **Routing decision layer** — composes existing classifier + new agentic-intent classifier + model_router + budget heuristic into a single routing call that returns `{backend, model_or_agent, rationale}`.
+- [x] **Routing decision layer** — composes existing classifier + new agentic-intent classifier + model_router + budget heuristic into a single routing call that returns `{backend, model_or_agent, rationale}`. _Validated in Phase 01: `src/routing/decide.py` + `python -m src.routing.decide '<prompt>'` CLI, hard-coded D-01 cascade in `policy.py`, D-18 import-graph guard ensures no HTTP/web-framework/LLM-SDK leakage. Canary backend accuracy 0.9286._
 - [ ] **FastAPI back-end** — wraps the Python routing pipeline behind HTTP / streaming endpoints; loads `joblib` artifacts at startup; orchestrates calls to OpenRouter / Claude Code SDK / computer-use.
 - [ ] **Next.js chat UI** — single-input chat surface with multi-turn threads, persistent history sidebar, streamed responses, and a visible "routed to X because Y" chip per turn.
 - [ ] **Persistent thread storage** — chat history persists across sessions (local SQLite or filesystem; no shared / hosted store).
@@ -98,4 +98,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-05-11 after initialization*
+*Last updated: 2026-05-14 — Phase 01 complete (router brain shipped: agentic-intent head + decide() + canary eval)*
