@@ -465,13 +465,12 @@ def train_task_type_classifier(df: pd.DataFrame):
         n_jobs=-1
     )
 
-    model.fit(X_train_combined, y_train)
-
     # ------------------------------------------------------------
     # Calibration (ROUTER-03; RESEARCH §Pattern 1; sklearn 1.6+ FrozenEstimator)
     # ------------------------------------------------------------
-    # Carve a fresh calibration slice from the training data ONLY so the
-    # calibrator never sees the held-out test split (Pitfall 3). FrozenEstimator
+    # Carve a fresh calibration slice FIRST, then fit the base on the
+    # disjoint train slice ONLY so the calibrator never sees data the base
+    # was fit on (Pitfall 3 — fixes CR-01 from 01-REVIEW.md). FrozenEstimator
     # wraps the fitted base; CalibratedClassifierCV does NOT refit the base —
     # it only fits the sigmoid head on the slice (Pitfall 1: the legacy
     # prefit-cv argument is removed in sklearn 1.8; FrozenEstimator is the
@@ -483,6 +482,11 @@ def train_task_type_classifier(df: pd.DataFrame):
         random_state=42,
         stratify=y_train,
     )
+
+    # Fit the base on the disjoint train slice (X_train_only), NOT the full
+    # X_train_combined. This ensures FrozenEstimator wraps a model that has
+    # never seen X_calib, so calibrator inputs are out-of-sample.
+    model.fit(X_train_only, y_train_only)
 
     calibrated = CalibratedClassifierCV(
         FrozenEstimator(model),
