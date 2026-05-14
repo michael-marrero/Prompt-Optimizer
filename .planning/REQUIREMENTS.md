@@ -9,7 +9,7 @@ Requirements for the auto-routing chat milestone. Each maps to a roadmap phase.
 
 ### Router Brain
 
-- [ ] **ROUTER-01**: Trained binary `agentic_intent_classifier.joblib` distinguishes conversational from agentic prompts, persisted alongside existing classifiers
+- [x] **ROUTER-01**: Trained binary `agentic_intent_classifier.joblib` distinguishes conversational from agentic prompts, persisted alongside existing classifiers
 - [ ] **ROUTER-02**: Task-type classifier extended with an OOD/unknown sentinel class that triggers a safe-default route when confidence is low
 - [ ] **ROUTER-03**: Existing classifiers (task type, model router) wrapped in `CalibratedClassifierCV` so `predict_proba` is meaningful for routing decisions
 - [ ] **ROUTER-04**: Hand-labeled routing canary eval set (30-50 real-chat prompts) measures backend-pick accuracy, distinct from the LLMRouterBench training split
@@ -134,7 +134,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| ROUTER-01 | Phase 1 | Pending |
+| ROUTER-01 | Phase 1 | Complete |
 | ROUTER-02 | Phase 1 | Pending |
 | ROUTER-03 | Phase 1 | Pending |
 | ROUTER-04 | Phase 1 | Pending |

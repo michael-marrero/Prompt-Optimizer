@@ -4,14 +4,14 @@ milestone: v1.0
 milestone_name: milestone
 status: executing
 stopped_at: Phase 1 Plan 03 complete (agentic_intent_training.csv assembled — ROUTER-01 prep done; Plan 04 ready)
-last_updated: "2026-05-14T02:09:04.916Z"
+last_updated: "2026-05-14T03:06:15.396Z"
 last_activity: 2026-05-14
 progress:
   total_phases: 6
   completed_phases: 0
   total_plans: 8
-  completed_plans: 3
-  percent: 38
+  completed_plans: 4
+  percent: 50
 ---
 
 # Project State
@@ -26,11 +26,11 @@ See: .planning/PROJECT.md (updated 2026-05-11)
 ## Current Position
 
 Phase: 01 (router-brain-foundation) — EXECUTING
-Plan: 4 of 8 (Plans 01, 02, 03 complete; advancing to Plan 04)
+Plan: 5 of 8 (Plans 01, 02, 03 complete; advancing to Plan 04)
 Status: Ready to execute
-Last activity: 2026-05-14 -- Phase 01 Plan 03 complete (agentic_intent_training.csv)
+Last activity: 2026-05-14
 
-Progress: [████░░░░░░] 38%
+Progress: [█████░░░░░] 50%
 
 ## Performance Metrics
 
@@ -60,6 +60,7 @@ Progress: [████░░░░░░] 38%
 | Phase 01 P03 | 11 min | 3 tasks | 8 files |
 
 *Updated after each plan completion*
+| Phase 01 P04 | 37m | 2 tasks | 4 files |
 
 ## Accumulated Context
 
@@ -80,6 +81,7 @@ Recent decisions affecting current work:
 - Phase 1 Plan 02: NLTK lazy download (`_ensure_nltk_sentence_tokenizer`) collides with Claude Code's network/filesystem sandbox. Local test runs require either a one-time `dangerouslyDisableSandbox: true` to populate `~/nltk_data/` or pre-fetching NLTK data outside the sandbox. CI workflow already pre-fetches; downstream plans inherit this constraint.
 - [Phase 01]: Plan 03 Rule 4 deviation: negatives mined from data_processed/classifier_training.csv instead of flat_records.csv (upstream JSON tree absent; classifier_training.csv shares dataset + origin_query columns so the RESEARCH §Pattern 3 Step 4 filter applies verbatim).
 - [Phase 01]: Plan 03 LLM expansion performed by Claude Opus 4.7 via Claude Code on 2026-05-13 (one-time offline per RESEARCH A3); 477 paraphrases embedded verbatim in scripts/expand_agentic_seeds.py for deterministic reproducibility. src/routing/ remains HTTP-library-free.
+- [Phase ?]: Phase 1 Plan 04: agentic-intent classifier calibrated with method=sigmoid via FrozenEstimator+CalibratedClassifierCV; held-out accuracy=0.9505, macro-F1=0.9505, ECE=0.0364. method=isotonic switch is NOT needed (ECE well below 0.10 threshold).
 
 ### Pending Todos
 
@@ -102,6 +104,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-05-14T02:08:03.635Z
+Last session: 2026-05-14T03:06:11.736Z
 Stopped at: Phase 1 Plan 03 complete (agentic_intent_training.csv assembled — ROUTER-01 prep done; Plan 04 ready)
-Resume file: .planning/phases/01-router-brain-foundation/01-04-PLAN.md
+Resume file: None
