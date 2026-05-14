@@ -368,7 +368,9 @@ def train_agentic_intent_classifier(
     X_train_combined = hstack([X_train_tfidf, X_train_num_sparse])
     X_test_combined = hstack([X_test_tfidf, X_test_num_sparse])
 
-    # Base classifier — fitted on the full training combined matrix.
+    # Base classifier — fitted on the DISJOINT train slice (X_train_only)
+    # after the calibration split below, so FrozenEstimator wraps a model
+    # that never saw X_calib (Pitfall 3 — fixes CR-01 from 01-REVIEW.md).
     model = LogisticRegression(
         max_iter=1500,
         class_weight="balanced",
@@ -376,12 +378,13 @@ def train_agentic_intent_classifier(
         C=2.0,
         n_jobs=-1,
     )
-    model.fit(X_train_combined, y_train)
 
     # ------------------------------------------------------------
     # Calibration step (RESEARCH §Pattern 1; sklearn 1.6+ FrozenEstimator)
     # Carve a fresh calibration slice FROM the training data only —
-    # never from the held-out test split (Pitfall 3).
+    # never from the held-out test split (Pitfall 3). The base is then
+    # fit on X_train_only (the disjoint complement) so the calibrator
+    # sees out-of-sample predictions.
     # FrozenEstimator wraps the fitted base; CalibratedClassifierCV does
     # NOT refit the base — it only fits the calibration head on the slice.
     # ------------------------------------------------------------
@@ -392,6 +395,9 @@ def train_agentic_intent_classifier(
         random_state=42,
         stratify=y_train,
     )
+
+    # Fit base on the disjoint train slice, NOT the full X_train_combined.
+    model.fit(X_train_only, y_train_only)
 
     calibrated = CalibratedClassifierCV(
         FrozenEstimator(model),
