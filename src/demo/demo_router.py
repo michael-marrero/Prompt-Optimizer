@@ -20,6 +20,7 @@ CONFIG_DIR = os.path.join(PROJECT_ROOT, "config")
 
 TASK_CLASSIFIER_PATH = os.path.join(MODELS_DIR, "task_type_classifier.joblib")
 MODEL_ROUTER_PATH = os.path.join(MODELS_DIR, "model_router.joblib")
+AGENTIC_INTENT_PATH = os.path.join(MODELS_DIR, "agentic_intent_classifier.joblib")
 MODEL_MAPPING_PATH = os.path.join(CONFIG_DIR, "model_mapping.json")
 
 if SRC_DIR not in sys.path:
@@ -27,6 +28,14 @@ if SRC_DIR not in sys.path:
 
 from Feature_extractor import PromptFeatureExtractor
 from src.feature_extraction.text_inputs import build_router_text_input_single
+
+# ROUTER-07: route_prompt now delegates to the framework-free routing brain
+# rather than running its own two-stage pipeline. The REPL surface
+# (input loop + print_route_result) is preserved verbatim for backward
+# compatibility; internally the brain emits a RoutingDecision that we
+# adapt back into the legacy dict shape print_route_result consumes.
+from src.routing.decide import decide
+from src.routing.schema import RoutingDecision
 
 
 # ------------------------------------------------------------
@@ -109,7 +118,7 @@ def build_numeric_features(
 
 
 # ------------------------------------------------------------
-# Stage 1: Task classifier
+# Stage 1: Task classifier (kept for legacy callers / tests)
 # ------------------------------------------------------------
 
 def predict_task_type(
@@ -119,6 +128,11 @@ def predict_task_type(
 ):
     """
     Predict the task/question type for a prompt.
+
+    NOTE: Plan 08 / ROUTER-07 moved the live demo pipeline to
+    `src.routing.decide`. This function is preserved unchanged for any
+    legacy callers (e.g. import-time smoke tests) that depend on its
+    return shape, but `route_prompt` no longer calls it.
     """
 
     model = task_artifacts["model"]
@@ -159,7 +173,7 @@ def predict_task_type(
 
 
 # ------------------------------------------------------------
-# Stage 2: Exact/top model router
+# Stage 2: Exact/top model router (kept for legacy callers / tests)
 # ------------------------------------------------------------
 
 def predict_best_model(
@@ -171,6 +185,10 @@ def predict_best_model(
 ):
     """
     Predict the best model class using the trained model router.
+
+    NOTE: Plan 08 / ROUTER-07 moved the live demo pipeline to
+    `src.routing.decide`. This function is preserved unchanged for any
+    legacy callers; `route_prompt` no longer calls it.
     """
 
     model = model_router_artifacts["model"]
@@ -264,43 +282,81 @@ def get_api_model_for_real_call(final_model_info: dict):
 
 
 # ------------------------------------------------------------
-# Full route pipeline
+# RoutingDecision -> legacy dict adapter (ROUTER-07)
 # ------------------------------------------------------------
 
-def route_prompt(
+def _decision_to_legacy_dict(
+    decision: RoutingDecision,
     prompt: str,
-    task_artifacts: dict,
-    model_router_artifacts: dict,
     model_mapping: dict,
-    extractor: PromptFeatureExtractor
-):
+) -> dict:
     """
-    Full two-stage route:
+    Adapt a RoutingDecision (produced by `src.routing.decide.decide`) into
+    the legacy dict shape consumed by `print_route_result` below.
 
-    prompt
-    -> task classifier
-    -> model router
-    -> mapped route metadata
+    The brain's `signals` carry per-stage telemetry; we project them back
+    onto the original demo keys so the existing print path keeps working.
+    For non-OpenRouter branches (claude_code / computer_use / fallback)
+    the brain's `model_or_agent` is the canonical identifier and there
+    is no model_router prediction — we synthesize sensible defaults so
+    `print_route_result` never crashes on a missing key.
+
+    Output keys (matches the original route_prompt return shape):
+      prompt
+      question_type, question_type_confidence, task_predictions
+      predicted_model, model_confidence, model_predictions
+      final_model_info, api_model_for_real_call
+      routing_decision  # NEW — the structured decision for future UI surfaces
     """
 
-    question_type, question_type_confidence, task_predictions = predict_task_type(
-        prompt=prompt,
-        task_artifacts=task_artifacts,
-        extractor=extractor
-    )
+    signals = decision.signals or {}
 
-    predicted_model, model_confidence, model_predictions = predict_best_model(
-        prompt=prompt,
-        question_type=question_type,
-        question_type_confidence=question_type_confidence,
-        model_router_artifacts=model_router_artifacts,
-        extractor=extractor
-    )
+    # --- Stage 1: task type (always populated by the brain) -----------
+    question_type = signals.get("task_type", "unknown")
+    question_type_confidence = float(signals.get("task_confidence", 0.0))
+    task_predictions = list(signals.get("task_top3", []))
 
-    final_model_info = choose_final_route(
-        predicted_model=predicted_model,
-        model_mapping=model_mapping
-    )
+    # --- Stage 2: model-or-agent + confidence + route metadata --------
+    # For the OpenRouter branch the brain populates "predicted_model"
+    # and "model_router_top3". For Claude Code / computer-use the
+    # `model_or_agent` is the canonical sentinel.
+    if decision.backend == "openrouter":
+        predicted_model = signals.get("predicted_model") or decision.model_or_agent
+        model_confidence = float(signals.get("model_router_confidence", decision.confidence))
+        model_predictions = list(signals.get("model_router_top3", []))
+
+        # Resolve route metadata via the legacy choose_final_route helper
+        # so the demo display keeps reading `display_name`, `provider`,
+        # `tier`, `api_model`, `openrouter_verified`, and `source` in
+        # exactly the shape it always has.
+        chosen_slug = signals.get("chosen_slug") or predicted_model
+        final_model_info = choose_final_route(chosen_slug, model_mapping)
+
+        # Override api_model with whatever the brain actually picked.
+        # For fallback (low-confidence + unverified-slug branches) this
+        # reflects the brain's decision rather than the raw slug's
+        # api_model from model_mapping.json (which may be null).
+        final_model_info = dict(final_model_info)
+        final_model_info["api_model"] = decision.model_or_agent
+
+    else:
+        # claude_code / computer_use — the brain's model_or_agent is the
+        # canonical sentinel; there is no model_router top-3 to display.
+        predicted_model = decision.model_or_agent
+        model_confidence = float(decision.confidence)
+        model_predictions = []
+
+        # Synthesize a route-info dict for the non-OpenRouter sentinels
+        # so print_route_result has a stable shape to render. None of
+        # these go through OpenRouter's verified slug list.
+        final_model_info = {
+            "display_name": decision.model_or_agent,
+            "provider": "claude_code" if decision.backend == "claude_code" else "computer_use",
+            "tier": "strong",
+            "api_model": decision.model_or_agent,
+            "openrouter_verified": False,
+            "source": decision.backend,
+        }
 
     api_model_for_real_call = get_api_model_for_real_call(final_model_info)
 
@@ -317,7 +373,76 @@ def route_prompt(
 
         "final_model_info": final_model_info,
         "api_model_for_real_call": api_model_for_real_call,
+
+        # NEW (Plan 08): expose the full structured decision so the
+        # future FastAPI / UI layers (Phase 3 / Phase 4) can render the
+        # rationale chip without re-running the brain.
+        "routing_decision": decision,
     }
+
+
+# ------------------------------------------------------------
+# Full route pipeline (now delegates to src.routing.decide)
+# ------------------------------------------------------------
+
+def route_prompt(
+    prompt: str,
+    task_artifacts: dict,
+    model_router_artifacts: dict,
+    model_mapping: dict,
+    extractor: PromptFeatureExtractor,
+    agentic_intent_artifacts: dict | None = None,
+):
+    """
+    Route a single prompt via the framework-free routing brain.
+
+    Plan 08 / ROUTER-07: instead of running the legacy two-stage
+    pipeline (predict_task_type -> predict_best_model -> choose_final_route)
+    in this function, we delegate to `src.routing.decide.decide()` which
+    composes the three calibrated heads (task_type + agentic_intent +
+    model_router) plus the D-01 rule cascade. The result is adapted
+    back into the legacy dict shape `print_route_result` consumes so
+    the REPL UX is unchanged.
+
+    The `extractor` arg is preserved for backwards compatibility — the
+    brain manages its own PromptFeatureExtractor singleton so we don't
+    need to pass ours in. The `task_artifacts`, `model_router_artifacts`,
+    and `agentic_intent_artifacts` are forwarded so the brain doesn't
+    re-load the joblibs on every REPL turn (perf optimization for
+    interactive use).
+
+    Args:
+      prompt: the user prompt text from the REPL.
+      task_artifacts: dict loaded from models/task_type_classifier.joblib.
+      model_router_artifacts: dict loaded from models/model_router.joblib.
+      model_mapping: dict loaded from config/model_mapping.json.
+      extractor: PromptFeatureExtractor (preserved for backwards-compat;
+                 unused internally because the brain owns its own).
+      agentic_intent_artifacts: dict loaded from
+                 models/agentic_intent_classifier.joblib. If None, the
+                 brain will load it from disk on the first call.
+    """
+
+    # Lazy-load the agentic-intent artifact if the caller didn't pre-load it
+    # (preserves the existing route_prompt signature for any test that
+    # constructs the call with only the legacy four arguments).
+    if agentic_intent_artifacts is None:
+        agentic_intent_artifacts = load_joblib_artifacts(
+            AGENTIC_INTENT_PATH,
+            "agentic_intent_classifier.joblib",
+        )
+
+    decision = decide(
+        prompt=prompt,
+        artifacts={
+            "task_type_classifier": task_artifacts,
+            "model_router": model_router_artifacts,
+            "agentic_intent_classifier": agentic_intent_artifacts,
+            "model_mapping": model_mapping,
+        },
+    )
+
+    return _decision_to_legacy_dict(decision, prompt, model_mapping)
 
 
 # ------------------------------------------------------------
@@ -380,15 +505,26 @@ def print_route_result(result: dict):
     if notes:
         print(f"Notes: {notes}")
 
-    print_top_predictions(
-        title="Top task type predictions:",
-        confidence_table=result["task_predictions"]
-    )
+    if result.get("task_predictions"):
+        print_top_predictions(
+            title="Top task type predictions:",
+            confidence_table=result["task_predictions"]
+        )
 
-    print_top_predictions(
-        title="Top model predictions:",
-        confidence_table=result["model_predictions"]
-    )
+    if result.get("model_predictions"):
+        print_top_predictions(
+            title="Top model predictions:",
+            confidence_table=result["model_predictions"]
+        )
+
+    # Plan 08 enhancement: surface the structured rationale + confidence
+    # produced by the routing brain so the user can see why a prompt
+    # routed where it did. Graceful degradation when an older caller
+    # doesn't pass routing_decision through.
+    decision = result.get("routing_decision")
+    if decision is not None:
+        print(f"\nRationale: {decision.rationale}")
+        print(f"Confidence: {decision.confidence:.3f}")
 
     print("\n" + "=" * 70)
 
@@ -400,7 +536,7 @@ def print_route_result(result: dict):
 def main():
     print("\nPrompt Optimizer Demo Router")
     print("----------------------------")
-    print("Pipeline: task classifier -> model router")
+    print("Pipeline: src.routing.decide -> calibrated 3-head cascade")
     print("Loading saved models and route mappings...")
 
     task_artifacts = load_joblib_artifacts(
@@ -411,6 +547,11 @@ def main():
     model_router_artifacts = load_joblib_artifacts(
         MODEL_ROUTER_PATH,
         "model_router.joblib"
+    )
+
+    agentic_intent_artifacts = load_joblib_artifacts(
+        AGENTIC_INTENT_PATH,
+        "agentic_intent_classifier.joblib"
     )
 
     model_mapping = load_json(
@@ -441,7 +582,8 @@ def main():
                 task_artifacts=task_artifacts,
                 model_router_artifacts=model_router_artifacts,
                 model_mapping=model_mapping,
-                extractor=extractor
+                extractor=extractor,
+                agentic_intent_artifacts=agentic_intent_artifacts,
             )
 
             print_route_result(result)
