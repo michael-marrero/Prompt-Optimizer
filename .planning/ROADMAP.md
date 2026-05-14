@@ -38,7 +38,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [x] 01-03-PLAN.md — Wave 1: Build agentic-intent dataset (seeds + LLM-synthesized + LLMRouterBench-mined negatives -> 1,000-row balanced CSV) — ROUTER-01 prep
 - [x] 01-04-PLAN.md — Wave 2: Train calibrated agentic-intent classifier -> models/agentic_intent_classifier.joblib — ROUTER-01
 - [x] 01-05-PLAN.md — Wave 2: Backup originals, add unknown class to build_question_type, calibrate task_type + model_router with FrozenEstimator, snapshot baselines.json — ROUTER-02 + ROUTER-03
-- [ ] 01-06-PLAN.md — Wave 3: Build src/routing/ package (schema, config, policy, decide, __main__) + smoke tests for D-18 import-graph guard + Success Criterion #4 — ROUTER-05 + ROUTER-06
+- [x] 01-06-PLAN.md — Wave 3: Build src/routing/ package (schema, config, policy, decide, __main__) + smoke tests for D-18 import-graph guard + Success Criterion #4 — ROUTER-05 + ROUTER-06
 - [ ] 01-07-PLAN.md — Wave 4: Author ~42-row canary CSV + evaluate_routing.py runner + canary schema tests — ROUTER-04
 - [ ] 01-08-PLAN.md — Wave 4: Wire demo_router.py to call src.routing.decide + artifact-compat regression guard + benchmark-no-regression guard — ROUTER-07
 

@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Phase 1 Plan 05 complete (ROUTER-02 + ROUTER-03 closed; calibrated heads + unknown OOD class + baselines.json shipped); Plan 06 ready
-last_updated: "2026-05-14T04:50:44.879Z"
+stopped_at: Phase 1 Plan 06 complete (ROUTER-05 + ROUTER-06 closed; src/routing/ routing brain + decide() CLI shipped; D-18 import-graph guard runtime-tested); Plan 07 ready
+last_updated: "2026-05-14T15:20:05.230Z"
 last_activity: 2026-05-14
 progress:
   total_phases: 6
   completed_phases: 0
   total_plans: 8
-  completed_plans: 5
-  percent: 63
+  completed_plans: 6
+  percent: 75
 ---
 
 # Project State
@@ -26,11 +26,11 @@ See: .planning/PROJECT.md (updated 2026-05-11)
 ## Current Position
 
 Phase: 01 (router-brain-foundation) — EXECUTING
-Plan: 6 of 8 (Plans 01, 02, 03 complete; advancing to Plan 04)
+Plan: 7 of 8 (Plans 01–06 complete; advancing to Plan 07)
 Status: Ready to execute
 Last activity: 2026-05-14
 
-Progress: [██████░░░░] 63%
+Progress: [████████░░] 75%
 
 ## Performance Metrics
 
@@ -62,6 +62,7 @@ Progress: [██████░░░░] 63%
 *Updated after each plan completion*
 | Phase 01 P04 | 37m | 2 tasks | 4 files |
 | Phase 01 P05 | 98m | 7 tasks | 9 files |
+| Phase 01 P06 | 51m | 3 tasks | 10 files |
 
 ## Accumulated Context
 
@@ -86,6 +87,12 @@ Recent decisions affecting current work:
 - [Phase ?]: Phase 1 Plan 05: calibrated task_type_classifier (11 classes incl unknown OOD) and model_router (16 classes) via FrozenEstimator + CalibratedClassifierCV(method=sigmoid); models/uncalibrated/ backup directory established (Pitfall 6); evaluation/baselines.json snapshot captured for Plan 08 regression guard (ROUTER-07).
 - [Phase ?]: Phase 1 Plan 05: 50 synthetic OOD prompts injected as unknown class (LLMRouterBench has 0 organic OOD rows). Final unknown count: 50 of 27253 rows (0.18%), well within Pitfall 2 bounds.
 - [Phase ?]: Phase 1 Plan 05: training-set ECE mildly regressed on both heads (task_type 0.116 -> 0.142; model_router 0.063 -> 0.074). Plan 07 should compute canary-set ECE; if > 0.10 there, switch to method='isotonic' (Open Question 1 escape hatch).
+- [Phase 01]: Phase 1 Plan 06: routing-brain D-01 cascade ordering deviates from literal `if/elif` order — browse-keyword fires BEFORE coding-task because the calibrated task classifier sometimes labels short browse prompts (e.g., "open URL and click X") as `coding`. CONTEXT D-15 "Informational-URL" explicitly says URL+action_verb -> computer-use; the reorder honors that intent. All other cascade semantics preserved.
+- [Phase 01]: Phase 1 Plan 06: task_type tau gate moved to AFTER the cascade (Stage 3b instead of Stage 1 exit). High-precision keyword/coding paths (D-01 cascade branches 1+2) bypass the task tau because they require only the agentic-intent signal; gating Stage 1 first would force fallback on clear "build me X" / "open URL" prompts because the calibrated task classifier is under-confident on short inputs (Plan 05 ECE 0.142). OpenRouter branch (Stage 3b) still gates on task_type tau because the model_router prediction depends on a well-defined task_type.
+- [Phase 01]: Phase 1 Plan 06: empty/whitespace prompt short-circuits to fallback BEFORE any classifier runs (V5 input validation). The calibrated heads would otherwise produce a "confident" prediction on "" by sheer prior.
+- [Phase 01]: Phase 1 Plan 06: fallback rationale suffix is the 25-character locked string "low confidence — fallback" with U+2014 em-dash at index 15. _build_fallback_decision asserts endswith at construction time as belt-and-suspenders for the unit tests. All fallback paths (3 tau gates + V5 empty + V7 try/except wrapper) emit a rationale ending with this suffix.
+- [Phase 01]: Phase 1 Plan 06: D-18 runtime import-graph guard in src/routing/tests/test_decide_smoke.py walks sys.modules after `import src.routing.decide` and asserts none of {fastapi, httpx, requests, aiohttp, anthropic, openai} appear at the top-level-package level. Test passes today; Phase 2 / Phase 3 planners must keep the guard green when adding new imports to src/routing/.
+- [Phase 01]: Phase 1 Plan 06: ROUTER-06 quality_first_pick cost-tiebreaker did NOT fire during CLI smoke testing on canonical prompts (top-1 to top-2 gap >> epsilon=0.02). Plan 07's canary should exercise boundary prompts to confirm the tiebreaker fires when expected; sweeping epsilon ∈ {0.01, 0.02, 0.05, 0.10} via the settings dict will produce the activation-rate histogram.
 
 ### Pending Todos
 
@@ -108,6 +115,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-05-14T04:50:44.870Z
-Stopped at: Phase 1 Plan 05 complete (ROUTER-02 + ROUTER-03 closed; calibrated heads + unknown OOD class + baselines.json shipped); Plan 06 ready
+Last session: 2026-05-14T05:55:48Z
+Stopped at: Phase 1 Plan 06 complete (ROUTER-05 + ROUTER-06 closed; src/routing/ routing brain + decide() CLI shipped; D-18 import-graph guard runtime-tested); Plan 07 ready
 Resume file: None
