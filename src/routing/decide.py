@@ -43,6 +43,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
 import os
 import sys
 from typing import Any, Optional
@@ -68,6 +69,12 @@ from src.routing.config import (
 )
 from src.routing.policy import choose_final_route, decide_backend, quality_first_pick
 from src.routing.schema import RoutingDecision
+
+# Module-level logger so the V7 catch surfaces internal errors to operators
+# (WR-02 from 01-REVIEW.md). Without this the brain would silently route
+# every prompt to openrouter/auto when, e.g., a joblib went corrupt or a
+# feature_columns mismatch developed — no operator-visible signal.
+logger = logging.getLogger(__name__)
 
 # ----------------------------------------------------------------------
 # sys.path injection so `from Feature_extractor import PromptFeatureExtractor`
@@ -495,6 +502,16 @@ def decide(
         # Never propagate exceptions. Emit a fallback decision so the
         # caller always gets a RoutingDecision (CONTEXT §threat_model
         # T-01-RB-V7).
+        #
+        # WR-02 fix: log the exception with traceback so operators see
+        # the failure (corrupt joblib, feature_columns mismatch, etc.).
+        # Without this, every prompt silently routes to openrouter/auto
+        # with no indication that the calibrated heads are broken.
+        # logger.exception emits ERROR-level + the full traceback to
+        # whichever handler the host process has configured.
+        logger.exception(
+            "decide() fell back to openrouter/auto due to error"
+        )
         return _build_fallback_decision(
             rationale_prefix=f"internal error: {type(exc).__name__}",
             signals={
