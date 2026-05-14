@@ -19,6 +19,8 @@ from sklearn.metrics import (
 )
 from sklearn.preprocessing import LabelEncoder, StandardScaler
 from sklearn.pipeline import FeatureUnion
+from sklearn.calibration import CalibratedClassifierCV, calibration_curve
+from sklearn.frozen import FrozenEstimator
 
 from src.feature_extraction.text_inputs import build_router_text_input_series
 
@@ -34,10 +36,12 @@ DATA_PROCESSED_DIR = os.path.join(PROJECT_ROOT, "data_processed")
 MODELS_DIR = os.path.join(PROJECT_ROOT, "models")
 EVALUATION_DIR = os.path.join(PROJECT_ROOT, "evaluation")
 ROUTER_PLOTS_DIR = os.path.join(EVALUATION_DIR, "model_router_plots")
+CALIBRATION_PLOTS_DIR = os.path.join(EVALUATION_DIR, "calibration_plots")
 
 os.makedirs(MODELS_DIR, exist_ok=True)
 os.makedirs(EVALUATION_DIR, exist_ok=True)
 os.makedirs(ROUTER_PLOTS_DIR, exist_ok=True)
+os.makedirs(CALIBRATION_PLOTS_DIR, exist_ok=True)
 
 INPUT_CSV = os.path.join(DATA_PROCESSED_DIR, "router_training_dataset_top_models.csv")
 MODEL_ROUTER_PATH = os.path.join(MODELS_DIR, "model_router.joblib")
@@ -461,6 +465,52 @@ def predict_user_input(
 
 
 # ------------------------------------------------------------
+# Calibration plot helper
+# ------------------------------------------------------------
+
+def plot_reliability_diagram(
+    y_true_binary: np.ndarray,
+    y_proba_max: np.ndarray,
+    stage_name: str,
+    output_dir: str = CALIBRATION_PLOTS_DIR,
+):
+    """
+    Save a reliability diagram (calibration curve) for a calibrated multiclass
+    classifier.
+
+    y_true_binary is `(y_pred == y_test).astype(int)` (the "did the argmax
+    win?" view), y_proba_max is `proba.max(axis=1)`. A perfectly calibrated
+    classifier lies on the diagonal y=x.
+    """
+
+    frac_pos, mean_pred = calibration_curve(
+        y_true_binary,
+        y_proba_max,
+        n_bins=10,
+        strategy="uniform",
+    )
+
+    fig, ax = plt.subplots(figsize=(8, 6))
+    ax.plot([0, 1], [0, 1], linestyle="--", label="Perfectly calibrated")
+    ax.plot(mean_pred, frac_pos, marker="o", label=stage_name)
+
+    ax.set_xlabel("Mean predicted probability (max class)")
+    ax.set_ylabel("Fraction correct")
+    ax.set_title(f"Reliability Diagram - {stage_name}")
+    ax.set_xlim(0.0, 1.0)
+    ax.set_ylim(0.0, 1.0)
+    ax.legend(loc="best")
+
+    plt.tight_layout()
+
+    output_path = os.path.join(output_dir, f"reliability_diagram_{stage_name}.png")
+    plt.savefig(output_path, dpi=300)
+    plt.close()
+
+    print(f"Saved reliability diagram to: {output_path}")
+
+
+# ------------------------------------------------------------
 # Training
 # ------------------------------------------------------------
 
@@ -593,6 +643,39 @@ def train_model_router(df: pd.DataFrame):
     print("\nTraining exact model router...")
     model.fit(X_train_combined, y_train)
 
+    # ------------------------------------------------------------
+    # Calibration (ROUTER-03; RESEARCH §Pattern 1; sklearn 1.6+ FrozenEstimator)
+    # ------------------------------------------------------------
+    # Carve a fresh 0.25 calibration slice from the training data ONLY so the
+    # calibrator never sees the held-out test split (Pitfall 3). FrozenEstimator
+    # wraps the fitted base; CalibratedClassifierCV does NOT refit the base —
+    # it only fits the sigmoid head on the slice (Pitfall 1: the legacy
+    # prefit-cv argument is removed in sklearn 1.8; FrozenEstimator is the
+    # replacement idiom).
+    #
+    # method="sigmoid" is the Phase 1 default for all three calibrated heads
+    # (RESEARCH Open Question 1). Switch this stage to method="isotonic" in a
+    # follow-up commit only if Plan 07's ECE > 0.10 on the canary set.
+    X_train_only, X_calib, y_train_only, y_calib = train_test_split(
+        X_train_combined,
+        y_train,
+        test_size=0.25,
+        random_state=42,
+        stratify=y_train,
+    )
+
+    calibrated = CalibratedClassifierCV(
+        FrozenEstimator(model),
+        method="sigmoid",
+    )
+    calibrated.fit(X_calib, y_calib)
+
+    # Reassign so downstream metric + persistence code uses the calibrated
+    # version. Pitfall 4: the artifact dict's `model` key still holds the
+    # primary inference object — we just swap LogisticRegression for
+    # CalibratedClassifierCV; all other keys stay identical.
+    model = calibrated
+
     y_pred = model.predict(X_test_combined)
 
     # Evaluation artifacts
@@ -617,6 +700,16 @@ def train_model_router(df: pd.DataFrame):
             target_names=label_encoder.classes_,
             zero_division=0
         )
+    )
+
+    # Reliability diagram (per stage; saved to evaluation/calibration_plots/).
+    proba_test = model.predict_proba(X_test_combined)
+    y_true_binary = (y_pred == y_test).astype(int)
+    y_proba_max = proba_test.max(axis=1)
+    plot_reliability_diagram(
+        y_true_binary=y_true_binary,
+        y_proba_max=y_proba_max,
+        stage_name="model_router",
     )
 
     save_router_artifacts(
