@@ -770,6 +770,18 @@ def run(canary_path: str, output_dir: str) -> dict:
                 f"accuracy={row['accuracy']:.4f}"
             )
     print()
+    # WR-05 fix: surface the ECE-proxy limitation in user-facing stdout.
+    # The per-stage ECE here uses y_true=backend_match (cascade-level
+    # outcome) rather than the per-stage canonical target — so it answers
+    # "does this stage's confidence predict end-to-end correctness?" not
+    # "is this stage internally calibrated against its own labels?". The
+    # baselines.json snapshot uses the canonical per-stage target instead,
+    # so these two numbers are NOT directly comparable.
+    print(
+        "Note: per-stage ECE uses backend_match as a proxy for y_true on "
+        "the canary; not directly\n"
+        "      comparable to baselines.json training-set ECE."
+    )
     print("Per-stage ECE (target <= {:.2f}):".format(ECE_THRESHOLD))
     for row in ece_rows:
         flag = " (>= threshold!)" if row["ece"] > ECE_THRESHOLD else ""
