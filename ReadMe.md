@@ -493,6 +493,22 @@ uv sync --all-extras
 
 This creates `.venv/`, installs every dependency pinned in `uv.lock`, and lets you prefix any command below with `uv run ` (e.g. `uv run python src/demo/demo_router.py`). The existing `pip install ...` instructions in the Requirements section below still work — `uv sync` is the new recommended path.
 
+### New: uv + routing CLI (Phase 1)
+
+Phase 1 added a `pyproject.toml` + `uv.lock` plus a framework-free routing brain at `src/routing/` that composes the calibrated task-type, agentic-intent, and model-router heads into a single `decide(prompt) -> RoutingDecision` call. Run the routing brain on a single prompt:
+
+```bash
+uv run python -m src.routing.decide "what is the capital of France?"
+```
+
+The REPL demo (`src/demo/demo_router.py`) is now backed by the same routing brain. The hand-labeled routing canary evaluation is:
+
+```bash
+uv run python -m src.evaluation.evaluate_routing
+```
+
+As of Phase 1, the routing decision is real (calibrated classifiers + rule cascade); Phase 2 wires the actual provider API call.
+
 ### 1. Flatten raw benchmark JSON files
 
 ```bash
@@ -579,7 +595,7 @@ Current limitations:
 - Exact model routing is harder than tier routing because model labels are imbalanced
 - Some benchmark models have very low support
 - Cost-aware routing was limited by binary benchmark scores and tied or zero costs
-- The final demo simulates routing decisions instead of calling live model APIs
+- As of Phase 1, the routing decision is real (calibrated classifiers + rule cascade); Phase 2 wires the actual provider API call.
 - Some benchmark model names do not directly map to verified OpenRouter routes
 
 ---
