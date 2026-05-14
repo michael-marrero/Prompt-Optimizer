@@ -316,7 +316,7 @@ def decide(
     """
     try:
         # ----------------------------------------------------------
-        # Normalize inputs
+        # Normalize inputs (V5 input validation)
         # ----------------------------------------------------------
         if not isinstance(prompt, str):
             prompt = "" if prompt is None else str(prompt)
@@ -330,6 +330,19 @@ def decide(
         tau_agentic = float(settings.get("agentic_intent_tau", DEFAULT_AGENTIC_INTENT_TAU))
         tau_router = float(settings.get("model_router_tau", DEFAULT_MODEL_ROUTER_TAU))
         epsilon = float(settings.get("epsilon", DEFAULT_EPSILON))
+
+        # Empty / whitespace-only prompts have no semantic content; the
+        # calibrated heads might still produce a "confident" prediction
+        # by sheer prior, but routing a blank prompt to any specific
+        # backend is wrong. Treat as OOD and short-circuit to fallback.
+        # This satisfies Plan 06 behavior Test 3 (empty -> fallback) and
+        # V5 input validation from the threat model.
+        if not prompt or not prompt.strip():
+            return _build_fallback_decision(
+                rationale_prefix="empty prompt",
+                signals={"task_confidence": 0.0, "task_type": "unknown"},
+                confidence=0.0,
+            )
 
         extractor = _get_extractor()
 
