@@ -15,7 +15,7 @@ Requirements for the auto-routing chat milestone. Each maps to a roadmap phase.
 - [x] **ROUTER-04**: Hand-labeled routing canary eval set (30-50 real-chat prompts) measures backend-pick accuracy, distinct from the LLMRouterBench training split
 - [x] **ROUTER-05**: Pure-function `src/routing/decide(prompt, history, artifacts, settings) -> RoutingDecision` returns `{backend, model_or_agent, rationale, confidence}` and is importable without FastAPI
 - [x] **ROUTER-06**: Quality-first within budget policy — when multiple backends pass quality threshold, cost is the tiebreaker
-- [ ] **ROUTER-07**: Existing CLI demo (`src/demo/demo_router.py`) updated to call `src/routing/decide()`; regression check confirms no degradation on benchmark eval
+- [x] **ROUTER-07**: Existing CLI demo (`src/demo/demo_router.py`) updated to call `src/routing/decide()`; regression check confirms no degradation on benchmark eval
 
 ### Backend Adapters
 
@@ -140,7 +140,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | ROUTER-04 | Phase 1 | Complete |
 | ROUTER-05 | Phase 1 | Complete |
 | ROUTER-06 | Phase 1 | Complete |
-| ROUTER-07 | Phase 1 | Pending |
+| ROUTER-07 | Phase 1 | Complete |
 | BACKEND-01 | Phase 2 | Pending |
 | BACKEND-02 | Phase 2 | Pending |
 | BACKEND-03 | Phase 2 | Pending |

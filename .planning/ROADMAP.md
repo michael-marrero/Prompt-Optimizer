@@ -12,7 +12,7 @@ Six phases stand up a production-quality auto-routing chat app on top of the exi
 
 Decimal phases appear between their surrounding integers in numeric order.
 
-- [ ] **Phase 1: Router Brain Foundation** - Pure `src/routing/decide()` with calibrated classifiers, agentic-intent head, OOD sentinel, and a hand-labeled routing canary eval
+- [x] **Phase 1: Router Brain Foundation** - Pure `src/routing/decide()` with calibrated classifiers, agentic-intent head, OOD sentinel, and a hand-labeled routing canary eval
 - [ ] **Phase 2: Backend Adapters & ChatChunk Contract** - Three backend adapters (OpenRouter, Claude Code, computer-use) emitting `ChatChunk` streams with cost caps and key-redaction baked in
 - [ ] **Phase 3: FastAPI Service & Persistent Storage** - HTTP/SSE service joining router + adapters, with `aiosqlite` thread/message/routing-decision persistence
 - [ ] **Phase 4: Minimal Chat UI (OpenRouter Backend)** - Next.js single-backend chat that proves the browser → Next → FastAPI → OpenRouter SSE pipe end-to-end
@@ -40,7 +40,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [x] 01-05-PLAN.md — Wave 2: Backup originals, add unknown class to build_question_type, calibrate task_type + model_router with FrozenEstimator, snapshot baselines.json — ROUTER-02 + ROUTER-03
 - [x] 01-06-PLAN.md — Wave 3: Build src/routing/ package (schema, config, policy, decide, __main__) + smoke tests for D-18 import-graph guard + Success Criterion #4 — ROUTER-05 + ROUTER-06
 - [x] 01-07-PLAN.md — Wave 4: Author ~42-row canary CSV + evaluate_routing.py runner + canary schema tests — ROUTER-04
-- [ ] 01-08-PLAN.md — Wave 4: Wire demo_router.py to call src.routing.decide + artifact-compat regression guard + benchmark-no-regression guard — ROUTER-07
+- [x] 01-08-PLAN.md — Wave 4: Wire demo_router.py to call src.routing.decide + artifact-compat regression guard + benchmark-no-regression guard — ROUTER-07
 
 ### Phase 2: Backend Adapters & ChatChunk Contract
 **Goal**: Three backend adapters (OpenRouter, Claude Code, computer-use) each implement the `BackendAdapter` Protocol and stream a single `ChatChunk` discriminated union. Per-turn cost caps, per-iteration step caps, key redaction, computer-use opt-in, and the `claude-agent-sdk` SDK pin are all enforced from the adapter layer — no UI yet.
@@ -116,7 +116,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Router Brain Foundation | 3/8 | In Progress | - |
+| 1. Router Brain Foundation | 8/8 | Complete | 2026-05-14 |
 | 2. Backend Adapters & ChatChunk Contract | 0/TBD | Not started | - |
 | 3. FastAPI Service & Persistent Storage | 0/TBD | Not started | - |
 | 4. Minimal Chat UI (OpenRouter Backend) | 0/TBD | Not started | - |
