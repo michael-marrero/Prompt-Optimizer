@@ -10,6 +10,11 @@ Loads `data_processed/routing_decision_eval.csv`, runs every row through
   - confusion_matrix.png          plotted version of the above
   - ece_per_stage.csv             ECE per calibrated head
   - low_confidence_rate.txt       single-line "low_confidence_rate=0.142"
+  - fallback_recall.txt           single-line float — fraction of rows
+                                  with is_fallback_expected=True where
+                                  decide() actually emitted the fallback
+                                  rationale suffix. Measures D-09/D-12
+                                  fallback fidelity (WR-04).
   - reliability_diagram_<stage>.png   one per calibrated head (3 files)
 
 Usage:
@@ -707,6 +712,39 @@ def run(canary_path: str, output_dir: str) -> dict:
     print(f"Saved low_confidence_rate to: {low_conf_path}")
 
     # ------------------------------------------------------------------
+    # fallback_recall.txt — WR-04 fix.
+    #
+    # Without this metric, D-09 / D-12 fallback fidelity was unmeasured by
+    # any emitted file. The evaluator computed is_fallback_actual but
+    # never compared it against is_fallback_expected: a canary row
+    # authored to verify the fallback path fires would be silently
+    # counted as a backend match if decide() returned the OpenRouter
+    # backend with a clean rationale (no fallback suffix).
+    #
+    # Recall = (rows with is_fallback_expected==True AND
+    #           is_fallback_actual==True) / (rows with
+    #           is_fallback_expected==True). Written as a single float on
+    #   a single line, e.g. "fallback_recall=0.833333\n".
+    # If no rows are flagged as is_fallback_expected, we write NaN to
+    # signal "metric undefined for this canary" rather than spurious 0.0.
+    # ------------------------------------------------------------------
+
+    expected_mask = rows_df["is_fallback_expected"].astype(bool)
+    n_expected_fb = int(expected_mask.sum())
+    if n_expected_fb == 0:
+        fallback_recall = float("nan")
+    else:
+        n_both = int(
+            (expected_mask & rows_df["is_fallback_actual"].astype(bool)).sum()
+        )
+        fallback_recall = float(n_both) / float(n_expected_fb)
+
+    fallback_recall_path = os.path.join(output_dir, "fallback_recall.txt")
+    with open(fallback_recall_path, "w", encoding="utf-8") as fh:
+        fh.write(f"fallback_recall={fallback_recall:.6f}\n")
+    print(f"Saved fallback_recall to: {fallback_recall_path}")
+
+    # ------------------------------------------------------------------
     # Per-row detail CSV (useful for debugging individual canary rows;
     # NOT counted in the 9-file D-16 list but a useful side-output).
     # ------------------------------------------------------------------
@@ -739,6 +777,17 @@ def run(canary_path: str, output_dir: str) -> dict:
     print()
     print(f"low_confidence_rate = {low_conf_rate:.4f} "
           f"({n_fallback_actual}/{len(rows_df)} rows hit the fallback rationale)")
+    if n_expected_fb == 0:
+        print(
+            "fallback_recall = NaN (no rows flagged is_fallback_expected=True; "
+            "metric undefined for this canary)"
+        )
+    else:
+        print(
+            f"fallback_recall    = {fallback_recall:.4f} "
+            f"({int((expected_mask & rows_df['is_fallback_actual'].astype(bool)).sum())}"
+            f"/{n_expected_fb} expected-fallback rows hit the fallback rationale)"
+        )
     if rows_df["tier_tiebreaker_fired"].sum() > 0:
         print(f"tier_tiebreaker fired on {int(rows_df['tier_tiebreaker_fired'].sum())} rows")
     print("=" * 64)
@@ -747,6 +796,7 @@ def run(canary_path: str, output_dir: str) -> dict:
         "backend_accuracy": overall_accuracy,
         "per_stage_ece": {row["stage"]: row["ece"] for row in ece_rows},
         "low_confidence_rate": low_conf_rate,
+        "fallback_recall": fallback_recall,
         "n_rows": int(len(rows_df)),
     }
 
