@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Phase 1 Plan 02 complete (PromptFeatureExtractor + text_inputs.py)
-last_updated: "2026-05-12T01:12:34Z"
-last_activity: 2026-05-12 -- Phase 01 Plan 02 complete
+stopped_at: Phase 1 Plan 03 complete (agentic_intent_training.csv assembled — ROUTER-01 prep done; Plan 04 ready)
+last_updated: "2026-05-14T02:09:04.916Z"
+last_activity: 2026-05-14
 progress:
   total_phases: 6
   completed_phases: 0
   total_plans: 8
-  completed_plans: 2
-  percent: 25
+  completed_plans: 3
+  percent: 38
 ---
 
 # Project State
@@ -26,30 +26,38 @@ See: .planning/PROJECT.md (updated 2026-05-11)
 ## Current Position
 
 Phase: 01 (router-brain-foundation) — EXECUTING
-Plan: 3 of 8 (Plans 01, 02 complete; advancing to Plan 03)
-Status: Executing Phase 01
-Last activity: 2026-05-12 -- Phase 01 Plan 02 complete
+Plan: 4 of 8 (Plans 01, 02, 03 complete; advancing to Plan 04)
+Status: Ready to execute
+Last activity: 2026-05-14 -- Phase 01 Plan 03 complete (agentic_intent_training.csv)
 
-Progress: [██░░░░░░░░] 25%
+Progress: [████░░░░░░] 38%
 
 ## Performance Metrics
 
 **Velocity:**
 
-- Total plans completed: 2
-- Average duration: 60.5 min
-- Total execution time: 121 min
+- Total plans completed: 3
+- Average duration: ~44 min
+- Total execution time: ~132 min
 
 **By Phase:**
 
 | Phase | Plans | Total | Avg/Plan |
 |-------|-------|-------|----------|
-| 01 | 2 | 121 min | 60.5 min |
+| 01 | 3 | ~132 min | ~44 min |
 
 **Recent Trend:**
 
-- Last 5 plans: 01-01 (31 min, 23 files created, OSS-01 + SECURE-03 delivered), 01-02 (90 min, 2 created + 4 modified, ROUTER-01 prep — 5 agentic features + text_inputs.py)
-- Trend: TDD adoption stabilizing; the slower wall-clock on 01-02 reflects the RED→GREEN cycle plus a sandbox/NLTK diagnostic loop, not new code complexity
+- Last 5 plans: 01-01 (31 min, 23 files created, OSS-01 + SECURE-03 delivered), 01-02 (90 min, 2 created + 4 modified, ROUTER-01 prep — 5 agentic features + text_inputs.py), 01-03 (~11 min on-CPU, 7 files created + 1 modified, ROUTER-01 prep — agentic_intent_training.csv assembled)
+- Trend: 01-03 was fast because two of three tasks were commit-only (prior gsd-executor authored the seeds + synthesized CSVs offline before pausing at a 3-gate checkpoint that the developer resolved between sessions); the real implementation work (negatives miner + builder script + test slice) compressed into Task 3
+
+**Per-plan metrics:**
+
+| Plan | Duration | Tasks | Files |
+|------|----------|-------|-------|
+| Phase 01 P01 | 31 min | 4 tasks | 23 files |
+| Phase 01 P02 | 90 min | 3 tasks | 6 files |
+| Phase 01 P03 | 11 min | 3 tasks | 8 files |
 
 *Updated after each plan completion*
 
@@ -70,6 +78,8 @@ Recent decisions affecting current work:
 - Phase 1 Plan 02: `_agentic_features` truncates input to 50,000 chars before any regex call. ReDoS mitigation against threat T-01-FE-1; bounds NLTK sentence-tokenizer cost too.
 - Phase 1 Plan 02: tier-router family (`src/model_router_tier/train_tier_router.py`, `src/model_router_tier/router_tier_system.py`) was NOT migrated to `text_inputs.py` in this plan — explicitly out of scope. The two tier-router files still define their own `build_text_input`. Plan 06's `decide.py` is the third migration site; tier-router cleanup is deferred to a later plan / dedicated cleanup phase.
 - Phase 1 Plan 02: NLTK lazy download (`_ensure_nltk_sentence_tokenizer`) collides with Claude Code's network/filesystem sandbox. Local test runs require either a one-time `dangerouslyDisableSandbox: true` to populate `~/nltk_data/` or pre-fetching NLTK data outside the sandbox. CI workflow already pre-fetches; downstream plans inherit this constraint.
+- [Phase 01]: Plan 03 Rule 4 deviation: negatives mined from data_processed/classifier_training.csv instead of flat_records.csv (upstream JSON tree absent; classifier_training.csv shares dataset + origin_query columns so the RESEARCH §Pattern 3 Step 4 filter applies verbatim).
+- [Phase 01]: Plan 03 LLM expansion performed by Claude Opus 4.7 via Claude Code on 2026-05-13 (one-time offline per RESEARCH A3); 477 paraphrases embedded verbatim in scripts/expand_agentic_seeds.py for deterministic reproducibility. src/routing/ remains HTTP-library-free.
 
 ### Pending Todos
 
@@ -92,6 +102,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-05-12T01:12:34Z
-Stopped at: Phase 1 Plan 02 complete (5 agentic features in PromptFeatureExtractor + text_inputs.py centralization — ROUTER-01 prep)
-Resume file: .planning/phases/01-router-brain-foundation/01-03-PLAN.md
+Last session: 2026-05-14T02:08:03.635Z
+Stopped at: Phase 1 Plan 03 complete (agentic_intent_training.csv assembled — ROUTER-01 prep done; Plan 04 ready)
+Resume file: .planning/phases/01-router-brain-foundation/01-04-PLAN.md
