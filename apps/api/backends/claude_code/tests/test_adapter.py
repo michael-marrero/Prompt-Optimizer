@@ -594,3 +594,48 @@ async def test_routing_signals_passed_through() -> None:
     )
     assert isinstance(chunks[-1], Done)
     assert chunks[-1].routing_signals == {"task_type": "coding"}
+
+
+# --------------------------------------------------------------------
+# CR-01 regression: FileDiff emission against the real SDK shape
+# (ToolResultBlock has ONLY tool_use_id, content, is_error).
+# --------------------------------------------------------------------
+
+
+async def test_filediff_emitted_against_real_sdk_shape() -> None:
+    """Construct FakeToolResultBlock with only the three real-SDK
+    fields. The adapter MUST recover tool_name/input via its
+    internal _pending_tool_calls map keyed on tool_use_id."""
+
+    client = FakeClaudeSDKClient(
+        response_messages=[
+            FakeAssistantMessage(
+                content=[
+                    FakeToolUseBlock(
+                        id="t1",
+                        name="Edit",
+                        input={"path": "src/a.py"},
+                    )
+                ]
+            ),
+            FakeUserMessage(
+                content=[
+                    FakeToolResultBlock(
+                        tool_use_id="t1",
+                        content="--- diff ---\n+x = 1\n",
+                        is_error=False,
+                    )
+                ]
+            ),
+            FakeResultMessage(),
+        ]
+    )
+    adapter = _build_adapter(client)
+    chunks = await _consume_stream(adapter)
+
+    file_diffs = [c for c in chunks if isinstance(c, FileDiff)]
+    assert len(file_diffs) == 1
+    assert file_diffs[0].operation == "edit"
+    assert file_diffs[0].path == "src/a.py"
+    assert file_diffs[0].tool_call_id == "t1"
+    assert file_diffs[0].diff.startswith("--- diff ---")
