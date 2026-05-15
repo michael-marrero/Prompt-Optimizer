@@ -109,9 +109,17 @@ class ComputerUseCostTracker(CostTracker):
         block. ``cache_read`` / ``cache_write`` are tracked for
         visibility (RESEARCH Open Question 3) but do not currently
         adjust the cost-cap arithmetic.
+
+        Replaces (not accumulates) the running input_tokens /
+        output_tokens tally — these come authoritative-once-per-iteration
+        from ``stream.get_final_message().usage``. Mirrors the override
+        semantics in ``OpenRouterCostTracker.record_final_usage`` and
+        ``ClaudeCodeCostTracker.record_result``. Cache counters
+        accumulate across iterations because the cache is a session-
+        level resource.
         """
 
-        self._tokens_in += int(input_tokens)
-        self._tokens_out += int(output_tokens)
+        self._tokens_in = int(input_tokens)
+        self._tokens_out = int(output_tokens)
         self._cache_read_total += int(cache_read)
         self._cache_write_total += int(cache_write)
