@@ -53,7 +53,12 @@ Decimal phases appear between their surrounding integers in numeric order.
   4. CI smoke test asserts `from claude_agent_sdk import ClaudeAgentOptions` succeeds and the deprecated `claude-code-sdk` is not in `uv.lock`; OpenRouter requests carry `HTTP-Referer` and `X-Title` headers (verified by request-recording test); `CLAUDE_ENABLE_STREAM_WATCHDOG=1` is set in the adapter's environment-bootstrapping code.
   5. Computer-use adapter raises a startup error unless `COMPUTER_USE_OPT_IN=1` is set; Claude Code adapter writes into a per-thread tmpdir under `~/.prompt-optimizer/workspaces/<thread_id>/` by default, with a settings flag required to point at the user's repo `cwd`; a pre-commit hook installed in this phase blocks any commit whose staged content matches `sk-` or `sk-ant-`.
 
-**Plans**: TBD
+**Plans**: 5 plans
+- [ ] 02-00-PLAN.md — Wave 0: Scaffolding + shared modules (pyproject.toml, apps/api/__init__.py, chunks.py, protocol.py, keystore.py, logging_filter.py, pricing.py, cost.py, config/pricing.json, shared tests, D-19 contract suite stub) — BACKEND-01, BACKEND-02, SECURE-01, SECURE-04
+- [ ] 02-01-PLAN.md — Wave 1: OpenRouter adapter (AsyncOpenAI + stream_options.include_usage + HTTP-Referer/X-Title + cost cap + cancellation + CLI) — BACKEND-03, BACKEND-06, BACKEND-07
+- [ ] 02-02-PLAN.md — Wave 1: Claude Code adapter (claude_agent_sdk.ClaudeSDKClient + interrupt + workspace mkdtemp + step cap 25 + watchdog env var + CLI) — BACKEND-04, BACKEND-06, BACKEND-07, BACKEND-08, BACKEND-09
+- [ ] 02-03-PLAN.md — Wave 1: Computer-use adapter (anthropic beta.messages.stream + computer_20251124 + Playwright headless Chromium + opt-in check + step cap 15 + Screenshot emit + CLI) — BACKEND-05, BACKEND-06, BACKEND-07, SECURE-05
+- [ ] 02-04-PLAN.md — Wave 2: Ops — pre-commit (no-secrets, no-deprecated-sdk) + CI extension (pre-commit run, OSS-06 smoke, dual pytest split) + optional live-smoke.yml + REQUIREMENTS.md reconciliation — SECURE-02, OSS-06
 
 ### Phase 3: FastAPI Service & Persistent Storage
 **Goal**: A running `uvicorn apps.api.main:app` process exposes thread CRUD, settings, and `POST /threads/{id}/turn` over SSE; routing artifacts load once at lifespan startup; SQLite (WAL + busy_timeout) persists threads, messages, routing decisions, and large blobs by reference; integration tests exercise streaming end-to-end without a browser.
@@ -117,7 +122,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. Router Brain Foundation | 8/8 | Complete | 2026-05-14 |
-| 2. Backend Adapters & ChatChunk Contract | 0/TBD | Not started | - |
+| 2. Backend Adapters & ChatChunk Contract | 0/5 | Not started | - |
 | 3. FastAPI Service & Persistent Storage | 0/TBD | Not started | - |
 | 4. Minimal Chat UI (OpenRouter Backend) | 0/TBD | Not started | - |
 | 5. Feature-Complete Chat UI | 0/TBD | Not started | - |
