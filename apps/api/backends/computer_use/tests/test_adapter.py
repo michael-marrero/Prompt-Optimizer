@@ -659,3 +659,44 @@ async def test_iteration_usage_recorded(fake_screen):
     assert done.tokens_out == 5
     # cost_usd should be > 0 (rates are non-zero in pricing.json).
     assert done.cost_usd is not None and done.cost_usd > 0
+
+
+# ----------------------------------------------------------------
+# CR-02 regression: record_iteration_usage OVERRIDES (not accumulates)
+# the running input/output token tally. Cache counters still
+# accumulate.
+# ----------------------------------------------------------------
+
+
+def test_record_iteration_usage_overrides_running_estimate(
+    pricing_table,
+) -> None:
+    """40 chars of text_delta -> 10 estimated output tokens.
+    Then record_iteration_usage(input_tokens=10, output_tokens=5)
+    MUST override the tally to (10, 5), not accumulate to (10, 15).
+
+    Mirrors VERIFICATION.md CR-02 reproduction (Truth 22)."""
+
+    from apps.api.backends.computer_use.cost import (
+        ComputerUseCostTracker,
+    )
+
+    tracker = ComputerUseCostTracker(
+        model_id="claude-opus-4-7",
+        max_cost_usd=0.50,
+        pricing=pricing_table,
+    )
+
+    tracker.record_output_text("x" * 40)
+    # Sanity: 40 // 4 = 10 estimated output tokens, 0 input.
+    assert tracker.tokens_in() == 0
+    assert tracker.tokens_out() == 10
+
+    tracker.record_iteration_usage(
+        input_tokens=10,
+        output_tokens=5,
+    )
+
+    # Override semantics — provider numbers REPLACE the estimate.
+    assert tracker.tokens_in() == 10
+    assert tracker.tokens_out() == 5
