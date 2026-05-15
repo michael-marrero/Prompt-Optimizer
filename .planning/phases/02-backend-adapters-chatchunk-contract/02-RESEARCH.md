@@ -2011,27 +2011,31 @@ class FakeOpenAIClient:
 
 **If this table is empty:** Not applicable — 9 assumed claims documented; all are explicitly flagged in the relevant section.
 
-## Open Questions
+## Open Questions (RESOLVED)
 
-1. **OpenRouter `/api/v1/models` — confirmed unauthenticated**
+1. **RESOLVED: OpenRouter `/api/v1/models` — confirmed unauthenticated**
    - What we know: Live `curl https://openrouter.ai/api/v1/models` returns HTTP/2 200 with no auth header (verified at research time). Response includes pricing for every model. Cloudflare-fronted with `Access-Control-Allow-Origin: *`.
    - What's unclear: Rate limits. The official doc mentions "cached at the edge" but no published rate limit. A 24h cache (D-17) is conservative.
    - Recommendation: Use the 24h cache; rate limits are unlikely to be an issue for a single startup hit per CLI invocation.
+   - **Resolution:** Accept 24h cache; revisit if 429s appear (defer to operations).
 
-2. **Anthropic SDK `usage.cache_*_tokens` fields exact names**
+2. **RESOLVED: Anthropic SDK `usage.cache_*_tokens` fields exact names**
    - What we know: Streaming `message_delta` events include a final `usage` block. `input_tokens`, `output_tokens` are standard.
    - What's unclear: The exact field names for cache read/write tokens (`cache_read_input_tokens` vs `cache_read`, etc.). Pattern 5's `getattr(..., "cache_read_input_tokens", 0)` is defensive.
    - Recommendation: Confirm via `anthropic --help` or live `usage` block inspection during live smoke. Defensive `getattr` is safe regardless.
+   - **Resolution:** Defensive `getattr` is the locked approach (RESEARCH Pattern 5 line numbers).
 
-3. **Phase 2 `Done.cost_usd` precedence with mixed authority sources**
+3. **RESOLVED: Phase 2 `Done.cost_usd` precedence with mixed authority sources**
    - What we know: OpenRouter's pre-flight `tracker.record_input_estimate` is an estimate; the final `stream_options.include_usage` chunk has truth. Claude Code's `ResultMessage.total_cost_usd` is authoritative per the SDK.
    - What's unclear: For computer-use's per-iteration `usage` block, is the SUM of all iterations' `input_tokens` correct (i.e., does Anthropic charge for cached prefix on every iteration), or do we need to subtract the cached portion?
    - Recommendation: Live smoke against `claude-opus-4-7` with computer-use, compare `Done.cost_usd` to the Anthropic dashboard usage page for the same date. Adjust if off by more than ±10%.
+   - **Resolution:** Defer authority precedence to live smoke; defensive code stands until then.
 
-4. **claude-agent-sdk message content shape for ToolResult blocks**
+4. **RESOLVED: claude-agent-sdk message content shape for ToolResult blocks**
    - What we know: `AssistantMessage.content` is a list of blocks. `UserMessage.content` may also be a list with `ToolResultBlock` items the SDK injects after running a tool.
    - What's unclear: Whether `UserMessage` instances in `receive_response()` carry just text or also `ToolResultBlock` items, and whether the SDK exposes the tool's stdout (Bash) directly on the block or buried inside `content`.
    - Recommendation: Test with a `pytest -m live` Claude Code Bash invocation. Pattern 4's code defensively iterates over `getattr(msg, "content", [])` and pattern-matches by isinstance.
+   - **Resolution:** `getattr(msg, "content", [])` + isinstance dispatch is the locked approach (Pattern 4); live smoke confirms shape.
 
 ## Environment Availability
 
