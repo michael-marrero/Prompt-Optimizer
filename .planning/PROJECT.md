@@ -98,4 +98,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-05-14 — Phase 01 complete (router brain shipped: agentic-intent head + decide() + canary eval)*
+*Last updated: 2026-05-15 — Phase 02 complete (three backend adapters + ChatChunk contract shipped: OpenRouter/Claude Code/computer-use streaming with cost caps, step caps, redaction, opt-in; CR-01/CR-02/CR-04/CR-05 closed via gap-closure plans 02-05/06/07).*
