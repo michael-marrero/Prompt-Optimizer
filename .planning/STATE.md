@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 02-05-PLAN.md (CR-01 gap closure — Claude Code adapter FileDiff lookup)
-last_updated: "2026-05-15T19:39:21.772Z"
+stopped_at: Completed 02-06-PLAN.md (CR-02 gap closure — ComputerUseCostTracker override semantics)
+last_updated: "2026-05-15T19:49:24.091Z"
 last_activity: 2026-05-15
 progress:
   total_phases: 6
   completed_phases: 1
   total_plans: 16
-  completed_plans: 14
-  percent: 88
+  completed_plans: 15
+  percent: 94
 ---
 
 # Project State
@@ -26,11 +26,11 @@ See: .planning/PROJECT.md (updated 2026-05-11)
 ## Current Position
 
 Phase: 02 (backend-adapters-chatchunk-contract) — EXECUTING
-Plan: 2 of 8
+Plan: 3 of 8
 Status: Ready to execute
 Last activity: 2026-05-15
 
-Progress: [█████████░] 88%
+Progress: [█████████░] 94%
 
 ## Performance Metrics
 
@@ -71,6 +71,7 @@ Progress: [█████████░] 88%
 | Phase 02 P03 | 15 | 3 tasks | 13 files |
 | Phase 02 P04 | 22 | 5 tasks | 9 files |
 | Phase 02 P05 | 5 | 1 tasks | 3 files |
+| Phase 02 P06 | 5 | 1 tasks | 2 files |
 
 ## Accumulated Context
 
@@ -132,6 +133,8 @@ Recent decisions affecting current work:
 - [Phase 02]: Phase 2 Plan 05 (gap closure CR-01): Claude Code adapter now uses _pending_tool_calls dict (local to each stream() invocation) to pair ToolUseBlock(id, name, input) with ToolResultBlock(tool_use_id) — matches the real claude_agent_sdk==0.1.81 ToolResultBlock three-field shape (tool_use_id + content + is_error). FakeToolResultBlock fields tool_name and input removed (they masked the bug).
 - [Phase 02]: Phase 2 Plan 05: TDD RED gate landed first (commit fd297a3) — regression test test_filediff_emitted_against_real_sdk_shape fails on the buggy adapter with len(file_diffs) == 0. GREEN landed in commit 2e79161 with adapter + fakes + existing T6/T7/T8 updates atomically.
 - [Phase 02]: Phase 2 Plan 05: _pending_tool_calls.pop(tool_use_id, ('', {})) defensive default — if a ToolResultBlock arrives without a preceding ToolUseBlock the empty tool_name falls through to the ToolResult branch (no FileDiff misfire, no raise). Aligns with surrounding V7 robustness style.
+- [Phase ?]: Phase 2 Plan 06 (gap closure CR-02): ComputerUseCostTracker.record_iteration_usage uses override semantics (=) for _tokens_in/_tokens_out matching its docstring and the parallel OpenRouter/Claude Code trackers; cache counters (_cache_read_total/_cache_write_total) PRESERVED as += because they are visibility-only running totals across iterations.
+- [Phase ?]: Phase 2 Plan 06: TDD RED gate landed first (commit 43b40ab) — regression test test_record_iteration_usage_overrides_running_estimate asserts tokens_out() == 5 after text='x'*40 + record_iteration_usage(input_tokens=10, output_tokens=5). RED commit showed 'assert 15 == 5'. GREEN landed in commit a95617a.
 
 ### Pending Todos
 
@@ -154,6 +157,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-05-15T19:39:21.764Z
-Stopped at: Completed 02-05-PLAN.md (CR-01 gap closure — Claude Code adapter FileDiff lookup)
+Last session: 2026-05-15T19:49:24.083Z
+Stopped at: Completed 02-06-PLAN.md (CR-02 gap closure — ComputerUseCostTracker override semantics)
 Resume file: None

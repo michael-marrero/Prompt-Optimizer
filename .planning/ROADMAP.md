@@ -60,7 +60,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [x] 02-03-PLAN.md — Wave 1: Computer-use adapter (anthropic beta.messages.stream + computer_20251124 + Playwright headless Chromium + opt-in check + step cap 15 + Screenshot emit + CLI) — BACKEND-05, BACKEND-06, BACKEND-07, SECURE-05
 - [x] 02-04-PLAN.md — Wave 2: Ops — pre-commit (no-secrets, no-deprecated-sdk) + CI extension (pre-commit run, OSS-06 smoke, dual pytest split) + optional live-smoke.yml + REQUIREMENTS.md reconciliation — SECURE-02, OSS-06
 - [x] 02-05-PLAN.md — Gap closure CR-01: Claude Code adapter FileDiff branch reachable in production via _pending_tool_calls dict pairing ToolUseBlock(id, name, input) with ToolResultBlock(tool_use_id); FakeToolResultBlock fields tool_name/input dropped to match real claude_agent_sdk==0.1.81 shape — BACKEND-04, BACKEND-02
-- [ ] 02-06-PLAN.md — Gap closure CR-02: Computer-use cost.py wired into adapter
+- [x] 02-06-PLAN.md — Gap closure CR-02: Computer-use cost.py wired into adapter
 - [ ] 02-07-PLAN.md — Gap closure CR-04 + CR-05: Logging redaction filter + pre-commit no-secrets hardening
 
 ### Phase 3: FastAPI Service & Persistent Storage
