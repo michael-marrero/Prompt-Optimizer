@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-status: ready_to_plan
-stopped_at: Phase 1 Plan 08 complete (ROUTER-07 closed; demo wired to src.routing.decide; test_artifact_compat + test_no_regression green; 100 passed / 0 skipped; phase ready for verification — all 5 success criteria + all 9 requirements implemented)
-last_updated: "2026-05-14T17:38:58.990Z"
+status: planning
+stopped_at: Phase 2 context gathered
+last_updated: "2026-05-15T01:42:36.745Z"
 last_activity: 2026-05-14
 progress:
   total_phases: 6
-  completed_phases: 2
+  completed_phases: 1
   total_plans: 8
   completed_plans: 8
-  percent: 33
+  percent: 100
 ---
 
 # Project State
@@ -125,6 +125,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-05-14T17:38:19.500Z
-Stopped at: Phase 1 Plan 07 complete (ROUTER-04 closed; canary CSV + evaluate_routing.py + D-16 metric stack; --check exits 1 today due to canary-proxy ECE > 0.10, Plan 08 owns recalibration decision)
-Resume file: None
+Last session: 2026-05-15T01:42:36.737Z
+Stopped at: Phase 2 context gathered
+Resume file: .planning/phases/02-backend-adapters-chatchunk-contract/02-CONTEXT.md
