@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 02-04-PLAN.md (pre-commit + CI + REQUIREMENTS/ROADMAP/VALIDATION reconciliation)
-last_updated: "2026-05-15T19:17:59.896Z"
-last_activity: 2026-05-15 -- Phase 02 planning complete
+stopped_at: Completed 02-05-PLAN.md (CR-01 gap closure — Claude Code adapter FileDiff lookup)
+last_updated: "2026-05-15T19:39:21.772Z"
+last_activity: 2026-05-15
 progress:
   total_phases: 6
   completed_phases: 1
   total_plans: 16
-  completed_plans: 13
-  percent: 81
+  completed_plans: 14
+  percent: 88
 ---
 
 # Project State
@@ -26,11 +26,11 @@ See: .planning/PROJECT.md (updated 2026-05-11)
 ## Current Position
 
 Phase: 02 (backend-adapters-chatchunk-contract) — EXECUTING
-Plan: 5 of 5
+Plan: 2 of 8
 Status: Ready to execute
-Last activity: 2026-05-15 -- Phase 02 planning complete
+Last activity: 2026-05-15
 
-Progress: [██████████] 100%
+Progress: [█████████░] 88%
 
 ## Performance Metrics
 
@@ -70,6 +70,7 @@ Progress: [██████████] 100%
 | Phase 02 P02 | 29 | 3 tasks | 14 files |
 | Phase 02 P03 | 15 | 3 tasks | 13 files |
 | Phase 02 P04 | 22 | 5 tasks | 9 files |
+| Phase 02 P05 | 5 | 1 tasks | 3 files |
 
 ## Accumulated Context
 
@@ -128,6 +129,9 @@ Recent decisions affecting current work:
 - [Phase 02]: Phase 2 Plan 04: live-smoke.yml weekly cron is OpenRouter-only. Anthropic / computer-use excluded from the cron because computer-use also needs Chromium + COMPUTER_USE_OPT_IN=1. Operators use workflow_dispatch for those. Budget ~$0.43/month per repo with OPENROUTER_API_KEY set.
 - [Phase 02]: Phase 2 Plan 04: REQUIREMENTS.md BACKEND-01 union grew from 6 to 7 variants — ToolResult between ToolCall and FileDiff per CONTEXT D-02. Phase 2 Plans 00-03 already built against 7-variant shape; docs reconciliation only. BACKEND-06 verified as already correct per D-15.
 - [Phase 02]: Phase 2 complete (15/15 requirements satisfied; 5/5 success criteria verifiable). Wave 0 + Wave 1 + Wave 2 all green. Whole-repo non-live suite passes (exit 0). Ready for /gsd-verify-work to validate.
+- [Phase 02]: Phase 2 Plan 05 (gap closure CR-01): Claude Code adapter now uses _pending_tool_calls dict (local to each stream() invocation) to pair ToolUseBlock(id, name, input) with ToolResultBlock(tool_use_id) — matches the real claude_agent_sdk==0.1.81 ToolResultBlock three-field shape (tool_use_id + content + is_error). FakeToolResultBlock fields tool_name and input removed (they masked the bug).
+- [Phase 02]: Phase 2 Plan 05: TDD RED gate landed first (commit fd297a3) — regression test test_filediff_emitted_against_real_sdk_shape fails on the buggy adapter with len(file_diffs) == 0. GREEN landed in commit 2e79161 with adapter + fakes + existing T6/T7/T8 updates atomically.
+- [Phase 02]: Phase 2 Plan 05: _pending_tool_calls.pop(tool_use_id, ('', {})) defensive default — if a ToolResultBlock arrives without a preceding ToolUseBlock the empty tool_name falls through to the ToolResult branch (no FileDiff misfire, no raise). Aligns with surrounding V7 robustness style.
 
 ### Pending Todos
 
@@ -150,6 +154,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-05-15T17:04:12.471Z
-Stopped at: Completed 02-04-PLAN.md (pre-commit + CI + REQUIREMENTS/ROADMAP/VALIDATION reconciliation)
+Last session: 2026-05-15T19:39:21.764Z
+Stopped at: Completed 02-05-PLAN.md (CR-01 gap closure — Claude Code adapter FileDiff lookup)
 Resume file: None
