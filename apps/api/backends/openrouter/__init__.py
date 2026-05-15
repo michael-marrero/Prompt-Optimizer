@@ -1,7 +1,13 @@
 """OpenRouter adapter package — public surface (BACKEND-03).
 
-The package re-export (``from .adapter import OpenRouterAdapter``) is
-attached AFTER Task 2 lands ``adapter.py``. Task 1 creates this
-package marker so the cost / errors / tests submodules are importable
-without forcing the adapter import chain. See ``apps.api.backends.openrouter.adapter``.
+Re-exports the ``OpenRouterAdapter`` class so callers can write::
+
+    from apps.api.backends.openrouter import OpenRouterAdapter
+
+instead of reaching into the module directly. Implementation lives in
+``apps.api.backends.openrouter.adapter``.
 """
+
+from apps.api.backends.openrouter.adapter import OpenRouterAdapter
+
+__all__ = ["OpenRouterAdapter"]
