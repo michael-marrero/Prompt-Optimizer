@@ -14,12 +14,15 @@
 #   T5:  AssistantMessages increment the step counter; max_steps=1
 #        and 2 AssistantMessages -> StreamError(step_cap_exceeded) +
 #        interrupt + Done.
-#   T6:  ToolUseBlock(name='Edit') + ToolResultBlock(tool_name='Edit')
-#        emits FileDiff(operation='edit').
-#   T7:  ToolUseBlock(name='Write') + ToolResultBlock(tool_name='Write')
-#        emits FileDiff(operation='create').
-#   T8:  ToolUseBlock(name='Bash') + ToolResultBlock(tool_name='Bash')
-#        emits ToolResult (NOT FileDiff).
+#   T6:  ToolUseBlock(name='Edit') + matching ToolResultBlock (looked up
+#        via _pending_tool_calls keyed on tool_use_id) emits
+#        FileDiff(operation='edit'). Real SDK ToolResultBlock has no
+#        tool_name / input field — see Plan 02-05 / CR-01.
+#   T7:  ToolUseBlock(name='Write') + matching ToolResultBlock emits
+#        FileDiff(operation='create') via the same id-keyed lookup.
+#   T8:  ToolUseBlock(name='Bash') + matching ToolResultBlock emits
+#        ToolResult (NOT FileDiff) — Bash recovered from the
+#        ToolUseBlock side is not in ('Edit', 'Write').
 #   T9:  cost cap mid-stream -> StreamError(cost_cap_exceeded) +
 #        interrupt + Done.
 #   T10: cancellation within 2 s calls interrupt; emits StreamError +
@@ -236,9 +239,7 @@ async def test_filediff_emitted_for_edit_tool() -> None:
                 content=[
                     FakeToolResultBlock(
                         tool_use_id="t1",
-                        tool_name="Edit",
                         content="--- a/src/a.py\n+++ b/src/a.py\n@@ ...",
-                        input={"path": "src/a.py"},
                     )
                 ]
             ),
@@ -277,9 +278,7 @@ async def test_filediff_emitted_for_write_tool() -> None:
                 content=[
                     FakeToolResultBlock(
                         tool_use_id="t2",
-                        tool_name="Write",
                         content="created new.py",
-                        input={"path": "src/new.py"},
                     )
                 ]
             ),
@@ -314,7 +313,6 @@ async def test_toolresult_emitted_for_bash_tool() -> None:
                 content=[
                     FakeToolResultBlock(
                         tool_use_id="t3",
-                        tool_name="Bash",
                         content="a.py b.py",
                     )
                 ]

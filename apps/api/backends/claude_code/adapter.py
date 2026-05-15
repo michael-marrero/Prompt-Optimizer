@@ -25,6 +25,11 @@ Pipeline (5 stages, all inside one top-level try/except for V7 robustness):
              - ThinkingBlock → continue (v1 drops thinking)
            Then ``tracker.record_assistant_usage(msg.usage)`` if present.
          * ``UserMessage`` → for each ToolResultBlock:
+             - tool_name + input recovered from
+               ``_pending_tool_calls.pop(tool_use_id, ("", {}))`` —
+               the real SDK ToolResultBlock has only ``tool_use_id``,
+               ``content``, ``is_error`` (no ``tool_name`` / no
+               ``input``); they must come from the ToolUseBlock side.
              - Edit/Write tool → yield FileDiff (D-02 specialisation)
              - else → yield ToolResult
          * ``ResultMessage`` → tracker.record_result(msg); break.
@@ -308,6 +313,16 @@ class ClaudeCodeAdapter:
             # No permission_mode override — defaults to user-controlled.
             # Phase 5 settings UI may set "acceptEdits" via this hook.
         )
+        # CR-01: pair ToolUseBlock(id, name, input) with the matching
+        # ToolResultBlock(tool_use_id, ...). The real claude_agent_sdk
+        # 0.1.81 ToolResultBlock carries ONLY ``tool_use_id``,
+        # ``content``, ``is_error`` — it has neither ``tool_name`` nor
+        # ``input``, so the adapter must look those up from the
+        # ToolUseBlock side. The dict is local to this ``stream()``
+        # invocation so concurrent calls on the same adapter instance
+        # cannot interfere.
+        _pending_tool_calls: dict[str, tuple[str, dict]] = {}
+
         client: Any = None
         try:
             client = self._client_factory(options=agent_opts)
@@ -344,6 +359,17 @@ class ClaudeCodeAdapter:
                                 tool_name=getattr(block, "name", ""),
                                 arguments=getattr(block, "input", {}) or {},
                             )
+                            # CR-01: store (tool_name, input) keyed by
+                            # the ToolUseBlock id so the matching
+                            # ToolResultBlock can recover them. The
+                            # real SDK's ToolResultBlock does NOT
+                            # carry tool_name / input.
+                            tool_id = getattr(block, "id", "")
+                            if tool_id:
+                                _pending_tool_calls[tool_id] = (
+                                    getattr(block, "name", ""),
+                                    getattr(block, "input", {}) or {},
+                                )
                         elif _is_thinking(block):
                             # v1 surface: drop ThinkingBlocks. The UI
                             # has no rendering path for them yet.
@@ -359,15 +385,22 @@ class ClaudeCodeAdapter:
                     # (RESEARCH Pattern 4 lines 776-778).
                     for block in getattr(msg, "content", []) or []:
                         if _is_tool_result(block):
+                            # CR-01: read only the three real-SDK fields
+                            # off the ToolResultBlock (tool_use_id,
+                            # content, is_error). Recover tool_name and
+                            # input from the ToolUseBlock side via
+                            # _pending_tool_calls (populated above when
+                            # the ToolUseBlock was emitted).
                             tool_use_id = getattr(block, "tool_use_id", "")
-                            tool_name = getattr(block, "tool_name", "")
                             content = getattr(block, "content", "")
                             is_error = getattr(block, "is_error", False)
+                            tool_name, tool_input = _pending_tool_calls.pop(
+                                tool_use_id, ("", {})
+                            )
                             if tool_name in ("Edit", "Write"):
-                                block_input = getattr(block, "input", None) or {}
                                 path = (
-                                    block_input.get("path", "")
-                                    if isinstance(block_input, dict)
+                                    tool_input.get("path", "")
+                                    if isinstance(tool_input, dict)
                                     else ""
                                 )
                                 yield FileDiff(

@@ -5,8 +5,9 @@ Public surface (Plan 02-02 Task 1):
 
     FakeTextBlock           ``text``
     FakeToolUseBlock        ``id`` + ``name`` + ``input``
-    FakeToolResultBlock     ``tool_use_id`` + ``tool_name`` + ``content``
-                            + ``is_error`` + optional ``input``
+    FakeToolResultBlock     ``tool_use_id`` + ``content`` + ``is_error``
+                            (matches the real claude_agent_sdk 0.1.81
+                            ToolResultBlock shape)
     FakeAssistantMessage    ``content`` (list) + optional ``usage``
     FakeUserMessage         ``content`` (list)
     FakeSystemMessage       ``subtype`` placeholder
@@ -55,16 +56,20 @@ class FakeToolUseBlock:
 class FakeToolResultBlock:
     """Mirrors ``claude_agent_sdk.ToolResultBlock``.
 
-    ``input`` is preserved on the result block so the adapter can pull
-    the Edit/Write file path from it when emitting ``FileDiff`` (per
-    RESEARCH Pattern 4 line 785).
+    Mirrors the real ``claude_agent_sdk==0.1.81`` ``ToolResultBlock``
+    shape exactly: three fields only (``tool_use_id``, ``content``,
+    ``is_error``). The adapter recovers the original ``tool_name`` and
+    ``input`` by ``tool_use_id`` lookup against its own
+    ``_pending_tool_calls`` map populated at ToolUseBlock emit time.
+
+    Earlier revisions of this fake carried ``tool_name`` and ``input``
+    fields, but those do NOT exist on the real SDK class — keeping
+    them here masked the production bug fixed by Plan 02-05 (CR-01).
     """
 
     tool_use_id: str = ""
-    tool_name: str = ""
     content: Any = ""
     is_error: bool = False
-    input: dict[str, Any] | None = None
 
 
 @dataclass
