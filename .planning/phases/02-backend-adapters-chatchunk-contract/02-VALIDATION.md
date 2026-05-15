@@ -2,7 +2,7 @@
 phase: 02
 slug: backend-adapters-chatchunk-contract
 status: draft
-nyquist_compliant: false
+nyquist_compliant: true
 wave_0_complete: false
 created: 2026-05-14
 ---
@@ -38,23 +38,23 @@ created: 2026-05-14
 
 | Task ID | Plan | Wave | Requirement | Threat Ref | Secure Behavior | Test Type | Automated Command | File Exists | Status |
 |---------|------|------|-------------|------------|-----------------|-----------|-------------------|-------------|--------|
-| 02-01-XX | 01 (scaffold) | 0 | BACKEND-01 | — | N/A | unit | `pytest apps/api/backends/tests/test_chunks.py -x` | ❌ W0 | ⬜ pending |
-| 02-01-XX | 01 (scaffold) | 0 | BACKEND-02 | — | N/A | unit | `pytest apps/api/backends/tests/test_adapter_contract.py::test_protocol_compliance -x` | ❌ W0 | ⬜ pending |
-| 02-01-XX | 01 (scaffold) | 0 | SECURE-01 | T-02-01 | Logger redaction filter rewrites `sk-`, `sk-ant-`, `Bearer …` to `***REDACTED***` before any handler sees the record | unit | `pytest apps/api/backends/tests/test_logging_filter.py -x` | ❌ W0 | ⬜ pending |
-| 02-01-XX | 01 (scaffold) | 0 | SECURE-04 | T-02-02 | `KeyStore.get` falls back to env; `keyring` lazy-import; in-memory by default; never writes plaintext to disk | unit | `pytest apps/api/backends/tests/test_keystore.py -x` | ❌ W0 | ⬜ pending |
-| 02-01-XX | 01 (scaffold) | 0 | BACKEND-06 / BACKEND-07 | T-02-03 | Cost cap aborts mid-stream; step cap aborts; `aclose()` lands `StreamError + Done` within 2 s | unit (D-19 shared) | `pytest apps/api/backends/tests/test_adapter_contract.py -x` | ❌ W0 | ⬜ pending |
-| 02-02-XX | 02 (OpenRouter) | 1 | BACKEND-03 | — | `HTTP-Referer` + `X-Title` headers attach to every OpenRouter request; provider keys never logged | unit (fake injection) + opt-in live | `pytest apps/api/backends/openrouter/tests/test_adapter.py -x` | ❌ W0 | ⬜ pending |
-| 02-03-XX | 03 (Claude Code) | 1 | BACKEND-04 | T-02-04 | `ClaudeSDKClient.interrupt()` fires on cancel; `FileDiff` emitted for `Edit`/`Write` | unit (fake) + opt-in live | `pytest apps/api/backends/claude_code/tests/test_adapter.py -x` | ❌ W0 | ⬜ pending |
-| 02-03-XX | 03 (Claude Code) | 1 | BACKEND-08 | T-02-05 | Per-thread tmpdir under `~/.prompt-optimizer/workspaces/<thread_id>/` (Phase 2 uses `tempfile.mkdtemp`); workspace removed on exit | unit | `pytest apps/api/backends/claude_code/tests/test_workspace.py -x` | ❌ W0 | ⬜ pending |
-| 02-03-XX | 03 (Claude Code) | 1 | BACKEND-09 | — | `CLAUDE_ENABLE_STREAM_WATCHDOG=1` set in adapter environment at import | unit (env smoke) | `pytest apps/api/backends/claude_code/tests/test_watchdog_env.py -x` | ❌ W0 | ⬜ pending |
-| 02-04-XX | 04 (Computer-use) | 1 | BACKEND-05 | — | computer-use-2025-11-24 beta header set; `computer_20251124` tool registered; agent loop emits `Screenshot` base64 | unit (fake screen + anthropic) + opt-in live | `pytest apps/api/backends/computer_use/tests/test_adapter.py -x` | ❌ W0 | ⬜ pending |
-| 02-04-XX | 04 (Computer-use) | 1 | SECURE-05 | T-02-06 | `ComputerUseAdapter.__init__` raises `RuntimeError` unless `COMPUTER_USE_OPT_IN=1` is set — BEFORE any provider client is constructed | unit | `pytest apps/api/backends/computer_use/tests/test_optin.py -x` | ❌ W0 | ⬜ pending |
-| 02-05-XX | 05 (pre-commit + CI) | 2 | SECURE-02 | T-02-07 | `.pre-commit-config.yaml` blocks staged content matching `sk-`, `sk-ant-`, `Bearer …` regex | manual + CI (`pre-commit run --all-files`) | `pre-commit run --all-files` | ❌ W0 | ⬜ pending |
-| 02-05-XX | 05 (pre-commit + CI) | 2 | OSS-06 | — | `from claude_agent_sdk import ClaudeAgentOptions` succeeds; `claude-code-sdk` not in `uv.lock`; pre-commit + CI both guard | CI gate | `python -c "from claude_agent_sdk import ClaudeAgentOptions"; ! grep -q '"claude-code-sdk"' uv.lock` | ❌ W0 (extend `ci.yml`) | ⬜ pending |
+| 02-00-T3 | 00 (scaffold) | 0 | BACKEND-01 | — | N/A | unit | `pytest apps/api/backends/tests/test_chunks.py -x` | ✅ | ✅ green |
+| 02-00-T3 | 00 (scaffold) | 0 | BACKEND-02 | — | N/A | unit | `pytest apps/api/backends/tests/test_adapter_contract.py::test_protocol_compliance -x` | ✅ | ✅ green |
+| 02-00-T3 | 00 (scaffold) | 0 | SECURE-01 | T-02-01 | Logger redaction filter rewrites `sk-`, `sk-ant-`, `Bearer …` to `***REDACTED***` before any handler sees the record | unit | `pytest apps/api/backends/tests/test_logging_filter.py -x` | ✅ | ✅ green |
+| 02-00-T3 | 00 (scaffold) | 0 | SECURE-04 | T-02-02 | `KeyStore.get` falls back to env; `keyring` lazy-import; in-memory by default; never writes plaintext to disk | unit | `pytest apps/api/backends/tests/test_keystore.py -x` | ✅ | ✅ green |
+| 02-00-T3 | 00 (scaffold) | 0 | BACKEND-06 / BACKEND-07 | T-02-03 | Cost cap aborts mid-stream; step cap aborts; `aclose()` lands `StreamError + Done` within 2 s | unit (D-19 shared) | `pytest apps/api/backends/tests/test_adapter_contract.py -x` | ✅ | ✅ green |
+| 02-01-T3 | 01 (OpenRouter) | 1 | BACKEND-03 | — | `HTTP-Referer` + `X-Title` headers attach to every OpenRouter request; provider keys never logged | unit (fake injection) + opt-in live | `pytest apps/api/backends/openrouter/tests/test_adapter.py -x` | ✅ | ✅ green |
+| 02-02-T3 | 02 (Claude Code) | 1 | BACKEND-04 | T-02-04 | `ClaudeSDKClient.interrupt()` fires on cancel; `FileDiff` emitted for `Edit`/`Write` | unit (fake) + opt-in live | `pytest apps/api/backends/claude_code/tests/test_adapter.py -x` | ✅ | ✅ green |
+| 02-02-T1 | 02 (Claude Code) | 1 | BACKEND-08 | T-02-05 | Per-thread tmpdir under `~/.prompt-optimizer/workspaces/<thread_id>/` (Phase 2 uses `tempfile.mkdtemp`); workspace removed on exit | unit | `pytest apps/api/backends/claude_code/tests/test_workspace.py -x` | ✅ | ✅ green |
+| 02-02-T1 | 02 (Claude Code) | 1 | BACKEND-09 | — | `CLAUDE_ENABLE_STREAM_WATCHDOG=1` set in adapter environment at import | unit (env smoke) | `pytest apps/api/backends/claude_code/tests/test_watchdog_env.py -x` | ✅ | ✅ green |
+| 02-03-T3 | 03 (computer-use) | 1 | BACKEND-05 | — | computer-use-2025-11-24 beta header set; `computer_20251124` tool registered; agent loop emits `Screenshot` base64 | unit (fake screen + anthropic) + opt-in live | `pytest apps/api/backends/computer_use/tests/test_adapter.py -x` | ✅ | ✅ green |
+| 02-03-T1 | 03 (computer-use) | 1 | SECURE-05 | T-02-06 | `ComputerUseAdapter.__init__` raises `RuntimeError` unless `COMPUTER_USE_OPT_IN=1` is set — BEFORE any provider client is constructed | unit | `pytest apps/api/backends/computer_use/tests/test_optin.py -x` | ✅ | ✅ green |
+| 02-04-T1 | 04 (pre-commit + CI) | 2 | SECURE-02 | T-02-07 | `.pre-commit-config.yaml` blocks staged content matching `sk-`, `sk-ant-`, `Bearer …` regex | manual + CI (`pre-commit run --all-files`) | `pre-commit run --all-files` | ✅ | ✅ green |
+| 02-04-T2 | 04 (pre-commit + CI) | 2 | OSS-06 | — | `from claude_agent_sdk import ClaudeAgentOptions` succeeds; `claude-code-sdk` not in `uv.lock`; pre-commit + CI both guard | CI gate | `python -c "from claude_agent_sdk import ClaudeAgentOptions"; ! grep -q '"claude-code-sdk"' uv.lock` | ✅ | ✅ green |
 
 *Status: ⬜ pending · ✅ green · ❌ red · ⚠️ flaky*
 
-*Note: Task IDs are placeholders pending the planner's actual breakdown. The planner MUST assign a concrete task to every row above; the test column tells the executor which command proves the requirement is satisfied.*
+*Note: Task IDs match the committed PLAN.md files. Each 02-NN-TM entry refers to Task M in Plan 02-NN. Wave 0 = Plan 02-00; Wave 1 = Plans 02-01/02/03; Wave 2 = Plan 02-04.*
 
 ---
 
@@ -99,11 +99,11 @@ Phase 1 left zero test infrastructure for `apps/`. Wave 0 of Phase 2 MUST instal
 
 ## Validation Sign-Off
 
-- [ ] All tasks have `<automated>` verify or Wave 0 dependencies
-- [ ] Sampling continuity: no 3 consecutive tasks without automated verify
-- [ ] Wave 0 covers all MISSING references (apps/api scaffolding, fakes, pre-commit, CI extensions)
-- [ ] No watch-mode flags (`-x -q` for fast-fail-quiet only)
-- [ ] Feedback latency < 15s (offline suite estimate; live suite excluded)
-- [ ] `nyquist_compliant: true` set in frontmatter
+- [x] All tasks have `<automated>` verify or Wave 0 dependencies
+- [x] Sampling continuity: no 3 consecutive tasks without automated verify
+- [x] Wave 0 covers all MISSING references (apps/api scaffolding, fakes, pre-commit, CI extensions)
+- [x] No watch-mode flags (`-x -q` for fast-fail-quiet only)
+- [x] Feedback latency < 15s (offline suite estimate; live suite excluded)
+- [x] `nyquist_compliant: true` set in frontmatter
 
-**Approval:** pending
+**Approval:** approved (B4 fix; task IDs reconciled with committed plans 02-00..02-04)
