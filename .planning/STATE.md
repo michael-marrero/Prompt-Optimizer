@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 02-01-PLAN.md (OpenRouter adapter)
-last_updated: "2026-05-15T15:30:57.595Z"
+stopped_at: Completed 02-02-PLAN.md (Claude Code adapter)
+last_updated: "2026-05-15T16:07:55.400Z"
 last_activity: 2026-05-15
 progress:
   total_phases: 6
   completed_phases: 1
   total_plans: 13
-  completed_plans: 10
-  percent: 77
+  completed_plans: 11
+  percent: 85
 ---
 
 # Project State
@@ -26,11 +26,11 @@ See: .planning/PROJECT.md (updated 2026-05-11)
 ## Current Position
 
 Phase: 02 (backend-adapters-chatchunk-contract) — EXECUTING
-Plan: 3 of 5
+Plan: 4 of 5
 Status: Ready to execute
 Last activity: 2026-05-15
 
-Progress: [████████░░] 77%
+Progress: [█████████░] 85%
 
 ## Performance Metrics
 
@@ -67,6 +67,7 @@ Progress: [████████░░] 77%
 | Phase 01 P08 | 10m | 4 tasks | 5 files |
 | Phase 02 P00 | 13 | 4 tasks | 17 files |
 | Phase 02 P01 | 26 | 3 tasks | 11 files |
+| Phase 02 P02 | 29 | 3 tasks | 14 files |
 
 ## Accumulated Context
 
@@ -112,6 +113,10 @@ Recent decisions affecting current work:
 - [Phase 02]: openai SDK 2.36 AuthenticationError + APIStatusError constructors dereference response.request — passing response=None per RESEARCH Pattern 3 raises AttributeError. Adapter and tests construct minimal httpx.Request + httpx.Response(status=401) via _build_missing_key_error / _make_auth_error helpers.
 - [Phase 02]: PROVIDER_ERROR_MAP isinstance lookup fails after Phase 1 D-18 guard purges openai from sys.modules. Fix: map_provider_error compares by fully-qualified class name as fallback to isinstance. test_provider_error_map_has_all_four_classes also rewritten to compare by name.
 - [Phase 02]: D-19 contract suite for openrouter parameterization passes 5/6 invariants (test_step_cap_aborts skipped per pytest.skip — N/A for single-round-trip OpenRouter). 24 unit tests + 5 parametric cases pass.
+- [Phase ?]: Phase 2 Plan 02: ClaudeCodeAdapter uses duck-typed message/block dispatch (_is_* helper pair: isinstance + class-name fallback) so Fake* dataclasses in tests/fakes.py work without monkeypatching the SDK imports. Real SDK objects still match via the isinstance leg. Plan Task 1 line 251 explicitly anticipated this choice.
+- [Phase ?]: Phase 2 Plan 02: ClaudeCodeAdapter constructor skips ANTHROPIC_API_KEY preflight when client_factory is provided (test-injection escape valve). D-19 shared contract suite's adapter_factory passes client_factory and no api_key — without this gate the contract suite cannot construct the adapter. The standalone test_missing_api_key_raises_before_stream invariant (no factory, no env) still raises correctly.
+- [Phase ?]: Phase 2 Plan 02: D-19 step_cap_aborts contract test passes as a real positive for claude_code (unlike openrouter's pytest.skip single-round-trip N/A). The conftest fake yields multiple AssistantMessages, the StepCounter trips on the second one, and the adapter emits StreamError(step_cap_exceeded) + Done + interrupt(). All 6 D-19 invariants are real passes.
+- [Phase ?]: Phase 2 Plan 02: ClaudeCodeAdapter re-export in __init__.py deferred to Task 2 commit (same pattern Plan 02-01 Decision #4 for OpenRouter). Task 1 ships __init__.py with only the watchdog setdefault so the cost/errors/step_counter/workspace submodules are importable during the Task 1 RED phase without an unresolved import chain.
 
 ### Pending Todos
 
@@ -134,6 +139,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-05-15T15:30:57.587Z
-Stopped at: Completed 02-01-PLAN.md (OpenRouter adapter)
+Last session: 2026-05-15T16:07:55.337Z
+Stopped at: Completed 02-02-PLAN.md (Claude Code adapter)
 Resume file: None

@@ -56,7 +56,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 **Plans**: 5 plans
 - [x] 02-00-PLAN.md — Wave 0: Scaffolding + shared modules (pyproject.toml, apps/api/__init__.py, chunks.py, protocol.py, keystore.py, logging_filter.py, pricing.py, cost.py, config/pricing.json, shared tests, D-19 contract suite stub) — BACKEND-01, BACKEND-02, SECURE-01, SECURE-04
 - [x] 02-01-PLAN.md — Wave 1: OpenRouter adapter (AsyncOpenAI + stream_options.include_usage + HTTP-Referer/X-Title + cost cap + cancellation + CLI) — BACKEND-03, BACKEND-06, BACKEND-07
-- [ ] 02-02-PLAN.md — Wave 1: Claude Code adapter (claude_agent_sdk.ClaudeSDKClient + interrupt + workspace mkdtemp + step cap 25 + watchdog env var + CLI) — BACKEND-04, BACKEND-06, BACKEND-07, BACKEND-08, BACKEND-09
+- [x] 02-02-PLAN.md — Wave 1: Claude Code adapter (claude_agent_sdk.ClaudeSDKClient + interrupt + workspace mkdtemp + step cap 25 + watchdog env var + CLI) — BACKEND-04, BACKEND-06, BACKEND-07, BACKEND-08, BACKEND-09
 - [ ] 02-03-PLAN.md — Wave 1: Computer-use adapter (anthropic beta.messages.stream + computer_20251124 + Playwright headless Chromium + opt-in check + step cap 15 + Screenshot emit + CLI) — BACKEND-05, BACKEND-06, BACKEND-07, SECURE-05
 - [ ] 02-04-PLAN.md — Wave 2: Ops — pre-commit (no-secrets, no-deprecated-sdk) + CI extension (pre-commit run, OSS-06 smoke, dual pytest split) + optional live-smoke.yml + REQUIREMENTS.md reconciliation — SECURE-02, OSS-06
 
