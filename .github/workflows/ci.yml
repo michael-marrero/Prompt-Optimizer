@@ -31,6 +31,12 @@ jobs:
       - name: Run pre-commit hooks (SECURE-02 + OSS-06)
         run: uv run pre-commit run --all-files
 
+      - name: Regex parity check (SECURE-01 + SECURE-02 contract)
+        run: |
+          uv run pytest -m 'not live' \
+            apps/api/backends/tests/test_logging_filter.py::test_logging_filter_and_no_secrets_regex_parity \
+            -x -q
+
       - name: OSS-06 — claude_agent_sdk import smoke
         run: uv run python -c "from claude_agent_sdk import ClaudeAgentOptions"
 

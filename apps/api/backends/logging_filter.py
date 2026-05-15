@@ -27,8 +27,16 @@ not re-interpolate the original (unredacted) ``%s`` arguments. Both
 the factory and the ``RedactionFilter`` do this.
 
 The three patterns intentionally MATCH the pre-commit hook in Plan 04
-(``scripts/no-secrets.sh``). Keeping the regex set in sync means the
-unit-test coverage for one path also protects the other.
+(``scripts/no-secrets.sh``). Both regex sets share the same alphabets:
+``sk-ant-[A-Za-z0-9_-]{8,}``, ``sk-[A-Za-z0-9_-]{20,}``,
+``Bearer\\s+[A-Za-z0-9_.-]{20,}`` (POSIX form ``Bearer[[:space:]]+``
+in the shell script). Ordering is Bearer FIRST so the canonical
+``Authorization: Bearer sk-ant-…`` header form rewrites as a single
+``Bearer ***REDACTED***`` unit — downstream scrubbers anchor on that
+exact form. ``apps/api/backends/tests/test_logging_filter.py::
+test_logging_filter_and_no_secrets_regex_parity`` enforces the
+equivalence at CI time; do NOT edit one regex set without updating the
+other (see VERIFICATION.md CR-04 / CR-05 for the live reproductions).
 
 Cross-refs:
     - 02-RESEARCH.md §"Pattern 10" lines 1472-1525 (original recipe)
@@ -44,13 +52,20 @@ import logging
 from typing import Final
 import re
 
-# Ordered: more-specific patterns first so partial overlaps resolve
-# predictably. ``sk-ant-…`` is a strict prefix of ``sk-…`` so the
-# anthropic-specific replacement must fire first.
+# Ordered: Bearer pattern FIRST so a canonical ``Authorization: Bearer
+# sk-…`` header is consumed as a single unit. Downstream scrubbers
+# anchor on the literal ``Bearer ***REDACTED***`` form; a later sk-ant-
+# match against the body of the same header would otherwise leave the
+# ``Bearer `` literal exposed alongside an anthropic-branch marker
+# (CR-05 regression — see
+# tests/test_logging_filter.py::test_bearer_prefixed_sk_ant_redacts_as_bearer_unit).
+# The two provider rules fire only when no Bearer prefix preceded the
+# secret; ``sk-ant-`` precedes ``sk-`` because the former is a strict
+# prefix of the latter and the more-specific replacement must win.
 SECRET_PATTERNS: Final[list[tuple[re.Pattern[str], str]]] = [
+    (re.compile(r"Bearer\s+[A-Za-z0-9_.\-]{20,}"), "Bearer ***REDACTED***"),
     (re.compile(r"sk-ant-[A-Za-z0-9_-]{8,}"), "***REDACTED-ANTHROPIC***"),
     (re.compile(r"sk-[A-Za-z0-9_-]{20,}"), "***REDACTED-OPENAI***"),
-    (re.compile(r"Bearer\s+[A-Za-z0-9_.\-]{20,}"), "Bearer ***REDACTED***"),
 ]
 
 
