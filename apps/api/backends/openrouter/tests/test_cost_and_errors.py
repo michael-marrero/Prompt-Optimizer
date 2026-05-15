@@ -155,11 +155,16 @@ def test_map_provider_error_unrelated_returns_internal_error():
 def test_provider_error_map_has_all_four_classes():
     from apps.api.backends.openrouter.errors import PROVIDER_ERROR_MAP
 
-    classes = set(PROVIDER_ERROR_MAP.keys())
-    assert openai.AuthenticationError in classes
-    assert openai.RateLimitError in classes
-    assert openai.APITimeoutError in classes
-    assert openai.APIStatusError in classes
+    # Compare by canonical class name to survive ``sys.modules`` purge-and-
+    # re-import cycles (the Phase 1 D-18 guard deliberately purges
+    # ``openai`` from ``sys.modules``, so object-identity comparison
+    # against the import-time ``PROVIDER_ERROR_MAP`` keys would yield
+    # false-negatives when ``openai`` lives at a different object id).
+    names = {f"{cls.__module__}.{cls.__qualname__}" for cls in PROVIDER_ERROR_MAP}
+    assert "openai.AuthenticationError" in names
+    assert "openai.RateLimitError" in names
+    assert "openai.APITimeoutError" in names
+    assert "openai.APIStatusError" in names
 
 
 # --------------------------------------------------------------------

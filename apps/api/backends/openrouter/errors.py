@@ -46,9 +46,22 @@ def map_provider_error(exc: Exception) -> tuple[str, str, bool]:
     Unrecognised exception classes (any subclass not in
     ``PROVIDER_ERROR_MAP``) fall back to ``("internal_error", str(exc),
     False)`` so the adapter still emits a valid ``StreamError``.
+
+    The lookup matches on **fully-qualified class name** rather than
+    object identity so the mapping survives ``sys.modules`` deletion-
+    and-re-import cycles (e.g. the Phase 1 D-18 guard test deliberately
+    purges ``openai`` from ``sys.modules`` to verify the routing brain
+    has no transitive HTTP / SDK import — afterwards the same exception
+    class lives at a different object id, so a naive ``isinstance``
+    against the import-time entry returns False).
     """
 
+    exc_class_names = {
+        f"{cls.__module__}.{cls.__qualname__}"
+        for cls in type(exc).__mro__
+    }
     for exc_class, (code, retriable) in PROVIDER_ERROR_MAP.items():
-        if isinstance(exc, exc_class):
+        canonical_name = f"{exc_class.__module__}.{exc_class.__qualname__}"
+        if isinstance(exc, exc_class) or canonical_name in exc_class_names:
             return code, str(exc), retriable
     return "internal_error", str(exc), False
