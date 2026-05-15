@@ -4,14 +4,14 @@ milestone: v1.0
 milestone_name: milestone
 status: executing
 stopped_at: Completed 02-02-PLAN.md (Claude Code adapter)
-last_updated: "2026-05-15T16:07:55.400Z"
+last_updated: "2026-05-15T16:32:23.476Z"
 last_activity: 2026-05-15
 progress:
   total_phases: 6
   completed_phases: 1
   total_plans: 13
-  completed_plans: 11
-  percent: 85
+  completed_plans: 12
+  percent: 92
 ---
 
 # Project State
@@ -26,11 +26,11 @@ See: .planning/PROJECT.md (updated 2026-05-11)
 ## Current Position
 
 Phase: 02 (backend-adapters-chatchunk-contract) — EXECUTING
-Plan: 4 of 5
+Plan: 5 of 5
 Status: Ready to execute
 Last activity: 2026-05-15
 
-Progress: [█████████░] 85%
+Progress: [█████████░] 92%
 
 ## Performance Metrics
 
@@ -68,6 +68,7 @@ Progress: [█████████░] 85%
 | Phase 02 P00 | 13 | 4 tasks | 17 files |
 | Phase 02 P01 | 26 | 3 tasks | 11 files |
 | Phase 02 P02 | 29 | 3 tasks | 14 files |
+| Phase 02 P03 | 15 | 3 tasks | 13 files |
 
 ## Accumulated Context
 
@@ -117,6 +118,10 @@ Recent decisions affecting current work:
 - [Phase ?]: Phase 2 Plan 02: ClaudeCodeAdapter constructor skips ANTHROPIC_API_KEY preflight when client_factory is provided (test-injection escape valve). D-19 shared contract suite's adapter_factory passes client_factory and no api_key — without this gate the contract suite cannot construct the adapter. The standalone test_missing_api_key_raises_before_stream invariant (no factory, no env) still raises correctly.
 - [Phase ?]: Phase 2 Plan 02: D-19 step_cap_aborts contract test passes as a real positive for claude_code (unlike openrouter's pytest.skip single-round-trip N/A). The conftest fake yields multiple AssistantMessages, the StepCounter trips on the second one, and the adapter emits StreamError(step_cap_exceeded) + Done + interrupt(). All 6 D-19 invariants are real passes.
 - [Phase ?]: Phase 2 Plan 02: ClaudeCodeAdapter re-export in __init__.py deferred to Task 2 commit (same pattern Plan 02-01 Decision #4 for OpenRouter). Task 1 ships __init__.py with only the watchdog setdefault so the cost/errors/step_counter/workspace submodules are importable during the Task 1 RED phase without an unresolved import chain.
+- [Phase 02]: Phase 2 Plan 03: anthropic SDK 0.102 AuthenticationError requires response: httpx.Response (non-Optional, keyword-only). Adapter and tests construct minimal httpx.Request + httpx.Response(status_code=401) via _build_missing_key_error helpers. Same Rule 1 pattern as Plan 02-01 Decision #1 (openai SDK 2.36).
+- [Phase 02]: Phase 2 Plan 03: ComputerUseAdapter cap checks are duplicated at TOP and BOTTOM of every agent-loop iteration. Post-iteration checks fire AFTER steps.increment() AND AFTER final_msg.usage is recorded — the primary cap gates because single-iteration streams cannot trip the cap via pre-increment top-of-loop checks alone (D-19 invariants #2 + #3).
+- [Phase 02]: Phase 2 Plan 03: All 3 Wave 1 adapters now in place; D-19 shared contract suite passes 17/18 (computer_use 6/6 + claude_code 6/6 + openrouter 5/6 with 1 intentional N/A skip). Whole-repo non-live test pass: 229 passed / 2 skipped / 3 deselected.
+- [Phase 02]: Phase 2 Plan 03: ComputerUseAdapter step_counter.py is sibling to claude_code/step_counter.py per D-08 — same class shape, only DEFAULT_STEP_CAP differs (15 vs 25). No cross-import. Future plan can promote to shared module once class shape proves stable.
 
 ### Pending Todos
 
@@ -139,6 +144,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-05-15T16:07:55.337Z
+Last session: 2026-05-15T16:32:23.468Z
 Stopped at: Completed 02-02-PLAN.md (Claude Code adapter)
 Resume file: None

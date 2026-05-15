@@ -23,7 +23,7 @@ Requirements for the auto-routing chat milestone. Each maps to a roadmap phase.
 - [x] **BACKEND-02**: Common `BackendAdapter` Protocol with one method: `async def stream(prompt, history, options) -> AsyncIterator[ChatChunk]`
 - [x] **BACKEND-03**: OpenRouter adapter streams chat models (Claude Sonnet, GPT-5, Gemini, DeepSeek, Qwen) using OpenAI SDK v1.40+ pointed at `https://openrouter.ai/api/v1`, with HTTP-Referer / X-Title attribution headers
 - [x] **BACKEND-04**: Claude Code adapter uses `claude-agent-sdk 0.1.80+` (NOT deprecated `claude-code-sdk`); streams tool calls + file diffs + final summary as `ChatChunk`s
-- [ ] **BACKEND-05**: Computer-use adapter uses `anthropic 0.40+` with `computer_20251124` tool + `computer-use-2025-11-24` beta header on Claude Opus 4.7 or Sonnet 4.6; streams screenshots + action narration
+- [x] **BACKEND-05**: Computer-use adapter uses `anthropic 0.40+` with `computer_20251124` tool + `computer-use-2025-11-24` beta header on Claude Opus 4.7 or Sonnet 4.6; streams screenshots + action narration
 - [x] **BACKEND-06**: Each adapter enforces a hard per-turn USD cap (default $0.50) and per-iteration step cap (25 for Claude Code, 15 for computer-use) at the adapter boundary
 - [x] **BACKEND-07**: Mid-stream cancellation — browser tab close / stop button propagates to upstream provider via `query.interrupt()` (Claude Code), aborted HTTP request (OpenRouter), or equivalent
 - [x] **BACKEND-08**: Claude Code runs in a per-thread ephemeral workspace by default; opt-in flag required to point at user's repo `cwd`
@@ -75,7 +75,7 @@ Requirements for the auto-routing chat milestone. Each maps to a roadmap phase.
 - [ ] **SECURE-02**: Pre-commit hook greps staged content for `sk-` and `sk-ant-` prefixes and blocks the commit if found
 - [x] **SECURE-03**: Root `.gitignore` excludes `.env`, `*.db`, `*.db-journal`, `*.db-wal`, `__pycache__/`, `.venv/`, `chat.db` from the first commit that touches key handling
 - [x] **SECURE-04**: BYOK keys live only in process memory + an OS keyring entry (via `keyring`) if the user opts in; never written to SQLite, JSON, or log files
-- [ ] **SECURE-05**: Computer-use is OFF by default; setting `COMPUTER_USE_OPT_IN=1` (env or settings panel) is required to enable it
+- [x] **SECURE-05**: Computer-use is OFF by default; setting `COMPUTER_USE_OPT_IN=1` (env or settings panel) is required to enable it
 - [ ] **SECURE-06**: README documents the computer-use threat model (prompt injection from visited pages, runaway cost, workspace exfiltration) and the per-thread ephemeral workspace defaults
 
 ### Open-Source Distribution
@@ -145,7 +145,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | BACKEND-02 | Phase 2 | Complete |
 | BACKEND-03 | Phase 2 | Complete |
 | BACKEND-04 | Phase 2 | Complete |
-| BACKEND-05 | Phase 2 | Pending |
+| BACKEND-05 | Phase 2 | Complete |
 | BACKEND-06 | Phase 2 | Complete |
 | BACKEND-07 | Phase 2 | Complete |
 | BACKEND-08 | Phase 2 | Complete |
@@ -185,7 +185,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | SECURE-02 | Phase 2 | Pending |
 | SECURE-03 | Phase 1 | Complete |
 | SECURE-04 | Phase 2 | Complete |
-| SECURE-05 | Phase 2 | Pending |
+| SECURE-05 | Phase 2 | Complete |
 | SECURE-06 | Phase 6 | Pending |
 | OSS-01 | Phase 1 | Complete |
 | OSS-02 | Phase 6 | Pending |
