@@ -1,485 +1,346 @@
 ---
 phase: 02-backend-adapters-chatchunk-contract
-reviewed: 2026-05-15T18:30:00Z
+reviewed: 2026-05-15T17:30:00Z
 depth: standard
-files_reviewed: 23
+files_reviewed: 9
 files_reviewed_list:
   - .github/workflows/ci.yml
-  - .github/workflows/live-smoke.yml
-  - apps/api/backends/chunks.py
   - apps/api/backends/claude_code/adapter.py
-  - apps/api/backends/claude_code/cost.py
-  - apps/api/backends/claude_code/errors.py
-  - apps/api/backends/claude_code/step_counter.py
-  - apps/api/backends/claude_code/workspace.py
-  - apps/api/backends/computer_use/adapter.py
+  - apps/api/backends/claude_code/tests/fakes.py
+  - apps/api/backends/claude_code/tests/test_adapter.py
   - apps/api/backends/computer_use/cost.py
-  - apps/api/backends/computer_use/errors.py
-  - apps/api/backends/computer_use/screen.py
-  - apps/api/backends/computer_use/step_counter.py
-  - apps/api/backends/cost.py
-  - apps/api/backends/keystore.py
+  - apps/api/backends/computer_use/tests/test_adapter.py
   - apps/api/backends/logging_filter.py
-  - apps/api/backends/openrouter/adapter.py
-  - apps/api/backends/openrouter/cost.py
-  - apps/api/backends/openrouter/errors.py
-  - apps/api/backends/pricing.py
-  - apps/api/backends/protocol.py
-  - scripts/no-deprecated-sdk.sh
+  - apps/api/backends/tests/test_logging_filter.py
   - scripts/no-secrets.sh
 findings:
-  critical: 5
-  warning: 9
-  info: 7
-  total: 21
+  critical: 1
+  warning: 6
+  info: 4
+  total: 11
 status: issues_found
 ---
 
-# Phase 2: Code Review Report
+# Phase 2 (Gap-Closure): Code Review Report
 
-**Reviewed:** 2026-05-15T18:30:00Z
+**Reviewed:** 2026-05-15T17:30:00Z
 **Depth:** standard
-**Files Reviewed:** 23
+**Files Reviewed:** 9
 **Status:** issues_found
 
 ## Summary
 
-Phase 2 ships three async backend adapters (OpenRouter / Claude Code / computer-use), a shared `ChatChunk` Pydantic union, `KeyStore`, `RedactionFilter`, `PricingTable`, `CostTracker`, and CI enforcement. The architecture is well thought out — SECURE-05 opt-in is verified at constructor time, cancellation paths emit the terminal `StreamError`+`Done` pair before re-raising, and the D-19 shared contract suite parametrizes across all three adapters.
+This adversarial review covers the gap-closure run for Phase 02 — three plans (02-05, 02-06, 02-07) that landed on `main` to close CR-01 (Claude Code FileDiff `tool_use_id` lookup), CR-02 (`ComputerUseCostTracker` override semantics), and CR-04+CR-05 (logging_filter ↔ no-secrets.sh regex parity + Bearer ordering).
 
-However, adversarial review surfaced **five Critical bugs** that ship breaking or near-breaking behaviour:
+**Gap-closure verification:**
 
-1. **`ClaudeCodeAdapter` reads `tool_name`/`input` from `ToolResultBlock`, fields that do not exist on the real `claude_agent_sdk.ToolResultBlock`** (verified against installed `claude_agent_sdk==0.1.81`). The live smoke test cannot pass — `FileDiff` will never be emitted in production.
-2. **`ComputerUseCostTracker.record_iteration_usage` uses `+=` while its docstring claims "Override the running estimate"**, causing per-iteration provider tokens to be double-counted with the char/4 running estimate.
-3. **`StreamError.message` carries `str(exc)` unredacted through SSE to the client** — provider SDK exceptions can contain echoed API keys or full request URLs and bypass the `RedactionFilter` entirely.
-4. **`scripts/no-secrets.sh` regex set is OUT OF SYNC with `logging_filter.SECRET_PATTERNS`** despite the docstring asserting "The three patterns intentionally MATCH the pre-commit hook." Both the OpenAI alphabet and Bearer whitespace differ.
-5. **`Bearer sk-…` style headers are mis-redacted** because the OpenAI regex `sk-[A-Za-z0-9_-]{20,}` fires before the Bearer regex, leaving the literal "Bearer " prefix attached to a redacted body.
+- **CR-01 (Claude Code FileDiff via tool_use_id lookup):** Correctly implemented. The `_pending_tool_calls` map is function-local (no cross-call interference), populated at `ToolUseBlock` emit, and drained at `ToolResultBlock` consumption via `dict.pop()`. The fake `FakeToolResultBlock` now mirrors the real SDK shape (three fields). However, I found one **Critical correctness bug** in the `FileDiff/ToolResult` content handling that the lookup fix surfaces but does not address (see CR-01 below).
 
-Nine Warnings + seven Info items round out the report. The Critical findings should be fixed before this code ships; the Warnings should be addressed before Phase 3 wires the adapters into FastAPI SSE.
+- **CR-02 (ComputerUseCostTracker override):** Correctly implemented. `_tokens_in` / `_tokens_out` now use assignment; cache counters still accumulate. Docstring matches behavior. Multi-iteration semantics need attention (see WR-02 below).
+
+- **CR-04+CR-05 (regex parity + Bearer ordering):** Bearer pattern is first in the python list; `Authorization: Bearer sk-ant-…` now redacts to a single `Bearer ***REDACTED***` unit. The CI parity step fails the build via `pytest -x`. However, the parity test is **asymmetric** (only verifies shell ⊆ python, never the reverse) and uses substring matching rather than tokenisation — both of which leave drift windows (see WR-01).
+
+Findings: 1 Critical, 6 Warnings, 4 Info. The Critical finding is a new bug exposed during inspection of the CR-01 fix; it is not a regression from the gap-closure plans but should be addressed before this code ships to the Phase 3 SSE integration.
 
 ## Critical Issues
 
-### CR-01: Claude Code adapter reads non-existent fields from `ToolResultBlock`
+### CR-01: `ToolResultBlock.content` is `str | list[dict] | None` but the adapter only handles `str | dict`
 
-**File:** `apps/api/backends/claude_code/adapter.py:362-372`
-**Issue:** The adapter consumes `getattr(block, "tool_name", "")` and `getattr(block, "input", None)` from a `ToolResultBlock`, then branches on `tool_name in ("Edit", "Write")` to emit `FileDiff` instead of `ToolResult`. The installed `claude_agent_sdk==0.1.81` defines `ToolResultBlock` with only three fields: `tool_use_id`, `content`, and `is_error` (see `.venv/lib/python3.11/site-packages/claude_agent_sdk/types.py:943-949`). The adapter's reliance on `tool_name`/`input` works ONLY because `FakeToolResultBlock` in `tests/fakes.py:55-67` adds them as test-only fields. On the real SDK these `getattr` calls return their defaults (`""` and `None`), the `tool_name in ("Edit", "Write")` branch never fires, and every tool result emits a `ToolResult` chunk instead of `FileDiff`. The live smoke test `test_live_create_hello_py` asserts `file_diffs, "expected at least one FileDiff chunk"` and will fail.
+**File:** `apps/api/backends/claude_code/adapter.py:395-421`
+**Issue:** The real `claude_agent_sdk==0.1.81` `ToolResultBlock.content` is typed `str | list[dict[str, Any]] | None` (verified at `.venv/lib/python3.11/site-packages/claude_agent_sdk/types.py:945`). The adapter reads `content = getattr(block, "content", "")` (default `""`), then for the FileDiff branch passes `diff=str(content)` (line 409), and for the ToolResult branch normalises `if isinstance(content, (str, dict))` (line 413).
 
-**Fix:** Track `tool_use_id → (tool_name, input)` at the `ToolUseBlock` emit site, then look it up on the matching `ToolResultBlock`. Example:
+For the typical SDK case where `content` is a `list[dict]` (e.g. `[{"type": "text", "text": "diff body"}]`):
+
+1. **FileDiff branch (Edit/Write):** `diff=str(content)` produces a Python repr like `"[{'type': 'text', 'text': '--- a/foo\\n+++ b/foo\\n...'}]"` — not a real diff. Downstream consumers (Phase 3 SSE, the chat UI) get a stringified Python list, not the unified-diff text they expect. The unit test `test_filediff_emitted_for_edit_tool` uses `content="--- a/src/a.py\\n+++ b/src/a.py\\n@@ ..."` (a bare `str`), so it never exercises the `list[dict]` branch — the bug is fully uncovered.
+2. **ToolResult branch (Bash/Glob/Grep/Read):** `isinstance(content, (str, dict))` is False for `list[dict]`, so it falls through to `str(content)` (line 416) — same Python-repr leak. `ToolResult.content` ends up being a stringified list of SDK blocks instead of the human-readable tool output.
+
+Confirmed against the SDK source:
 
 ```python
-# In stream():
-tool_use_index: dict[str, tuple[str, dict]] = {}  # id -> (name, input)
-
-# When yielding ToolCall (AssistantMessage branch):
-if _is_tool_use(block):
-    tool_id = getattr(block, "id", "")
-    tool_name = getattr(block, "name", "")
-    tool_input = getattr(block, "input", {}) or {}
-    tool_use_index[tool_id] = (tool_name, tool_input)
-    yield ToolCall(tool_call_id=tool_id, tool_name=tool_name, arguments=tool_input)
-
-# When handling ToolResultBlock (UserMessage branch):
-if _is_tool_result(block):
-    tool_use_id = getattr(block, "tool_use_id", "")
-    content = getattr(block, "content", "")
-    is_error = getattr(block, "is_error", False)
-    tool_name, tool_input = tool_use_index.get(tool_use_id, ("", {}))
-    if tool_name in ("Edit", "Write"):
-        path = tool_input.get("path", "") if isinstance(tool_input, dict) else ""
-        yield FileDiff(
-            tool_call_id=tool_use_id,
-            path=path,
-            diff=str(content),
-            operation="edit" if tool_name == "Edit" else "create",
-        )
-    else:
-        # ... existing ToolResult branch
+# .venv/lib/python3.11/site-packages/claude_agent_sdk/types.py:943-947
+class ToolResultBlock:
+    """Tool result content block."""
+    tool_use_id: str
+    content: str | list[dict[str, Any]] | None = None
+    is_error: bool | None = None
 ```
 
-Update `FakeToolResultBlock` to drop the `tool_name`/`input` fields so the tests exercise the same lookup path. Add a unit test that verifies `FileDiff` emission works against a `FakeToolResultBlock` that does NOT carry `tool_name`/`input`.
+The live smoke test will surface a stringified `[{...}]` in the FileDiff `diff` field. The CR-01 lookup fix is correct in isolation, but the content normalisation immediately downstream of the lookup still assumes a shape the SDK does not always emit.
 
-### CR-02: `ComputerUseCostTracker.record_iteration_usage` accumulates instead of overriding
-
-**File:** `apps/api/backends/computer_use/cost.py:97-117`
-**Issue:** The method docstring (line 105) states "Override the running estimate with provider-reported usage" but the implementation uses `+=` (lines 114-115):
+**Fix:** Normalise `list[dict]` to a flat string before yielding:
 
 ```python
-self._tokens_in += int(input_tokens)
-self._tokens_out += int(output_tokens)
+def _flatten_tool_result_content(content: Any) -> str:
+    """Reduce ToolResultBlock.content (str | list[dict] | None) to text."""
+    if content is None:
+        return ""
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts: list[str] = []
+        for item in content:
+            if isinstance(item, dict):
+                # SDK convention: {"type": "text", "text": "..."}
+                text = item.get("text") or item.get("content") or ""
+                parts.append(str(text))
+            else:
+                parts.append(str(item))
+        return "\n".join(parts)
+    return str(content)
+
+# At the FileDiff site (line 406-411):
+yield FileDiff(
+    tool_call_id=tool_use_id,
+    path=path,
+    diff=_flatten_tool_result_content(content),
+    operation="edit" if tool_name == "Edit" else "create",
+)
+
+# At the ToolResult site (line 413-421):
+flat = _flatten_tool_result_content(content)
+yield ToolResult(
+    tool_call_id=tool_use_id,
+    content=flat,
+    is_error=is_error,
+)
 ```
 
-Per-iteration the adapter calls `record_output_text` for every `text_delta` event (line 351 in `adapter.py`), accumulating char/4 estimates into `_tokens_out`. Then `record_iteration_usage` adds the authoritative output tokens ON TOP of those estimates rather than replacing them. The net `_tokens_out` reported in `Done.tokens_out` and used by `over_cap()` is `running_estimate + authoritative_count`, inflating both the displayed token count and the cap arithmetic. The base `Claude_code` and `openrouter` trackers correctly use assignment (`self._tokens_in = ...`).
+Add a regression test with `FakeToolResultBlock(content=[{"type": "text", "text": "--- a/foo\\n+++ b/foo\\n@@ ..."}])` and assert the emitted `FileDiff.diff` is the unified-diff string, NOT a Python `repr` of the list.
 
-The bug is masked in `test_iteration_usage_recorded` because the happy-path stream uses `text="ok"` (length 2), and `len("ok") // 4 = 0` — no running estimate is recorded, so the test cannot distinguish `+=` from `=`.
+## Warnings
 
-**Fix:** Either replace `+=` with `=` to match the docstring (cleanest), OR clear the running estimate before applying:
+### WR-01: Regex parity test is asymmetric and uses fragile substring matching
+
+**File:** `apps/api/backends/tests/test_logging_filter.py:62-124`
+**Issue:** The parity test enforces only **shell ⊆ python** — for every shell sub-pattern, assert there exists a python pattern containing it as a substring. It never enforces **python ⊆ shell**. Two failure modes follow:
+
+1. **Silent python-only additions:** If a fourth pattern is added to `SECRET_PATTERNS` without a corresponding shell update, the parity test still passes (the existing three shell patterns are still found in python). The companion `test_secret_patterns_count` happens to catch this specific case (it asserts `len(SECRET_PATTERNS) == 3`) — but the count check is **separate** and easy to bump in lockstep without anyone catching the drift.
+2. **Substring false positives:** `shell_sp in py` accepts any case where the shell pattern is a *strict substring* of a wider python pattern. Toy example: shell `sk-X` would "match" python `sk-X[A-Z]` even though the semantics differ. Today's patterns happen to be exact equals so this works, but the test does not enforce that they remain equal — it allows the python side to silently widen without failing CI.
+
+The current contract is "shell is a subset of python" — not the symmetric equivalence the docstring at `logging_filter.py:31-32` claims ("The three patterns intentionally MATCH the pre-commit hook").
+
+**Fix:** Tokenise both sides into normalised forms and assert set-equality:
 
 ```python
-def record_iteration_usage(
-    self,
-    *,
-    input_tokens: int,
-    output_tokens: int,
-    cache_read: int = 0,
-    cache_write: int = 0,
-) -> None:
-    # Override per docstring — authoritative SDK counts replace the
-    # char/4 running estimate accumulated from text_delta events.
-    self._tokens_in = int(input_tokens)
-    self._tokens_out = int(output_tokens)
+def _normalise(p: str) -> str:
+    return (
+        p.replace("[[:space:]]+", r"\s+")
+         .replace(r".\-", ".-")   # collapse python escapes
+    )
+
+shell_set = {_normalise(p) for p in shell_subpatterns}
+python_set = {_normalise(p) for p in python_patterns}
+assert shell_set == python_set, (
+    f"Drift detected.\n  shell-only: {shell_set - python_set}\n  python-only: {python_set - shell_set}"
+)
+```
+
+Add a unit test that demonstrates the drift — e.g. add a fake fourth python pattern and confirm the parity assertion fires.
+
+### WR-02: Computer-use multi-iteration tokens are overwritten, not accumulated
+
+**File:** `apps/api/backends/computer_use/cost.py:122-125`; `apps/api/backends/computer_use/adapter.py:391-409`
+**Issue:** The CR-02 fix is correct for the single-iteration happy path (the test exercises one iteration with `end_turn`). However, the computer-use adapter runs a `while True` loop (Pattern 5 / D-12) with multiple iterations. Each iteration calls `record_iteration_usage(input_tokens=…, output_tokens=…)`, which now ASSIGNS rather than accumulates. The behaviour:
+
+- Iteration 1: `input=100, output=50` → tracker now reports (100, 50).
+- Iteration 2: `input=80, output=30` → tracker now reports (80, 30) — iteration 1's tokens are gone.
+- Done chunk: reports (80, 30) — undercounting the turn's actual usage.
+
+If Anthropic's `final_msg.usage` is cumulative-across-iterations, this is correct. If it is per-iteration, the Done chunk under-reports tokens. The unit test does not distinguish — only `test_iteration_usage_recorded` runs, and it uses a single iteration (`stop_reason="end_turn"`).
+
+I cannot confirm Anthropic's exact semantics from the code under review (the SDK does not document it inline). Two safe options:
+
+**Fix Option A (assume per-iteration):** Accumulate `_tokens_in` and `_tokens_out` across iterations by snapshotting them before each iteration:
+
+```python
+def record_iteration_usage(self, *, input_tokens, output_tokens, cache_read=0, cache_write=0):
+    # Per-iteration: add to running totals.
+    self._tokens_in += int(input_tokens)
+    self._tokens_out += int(output_tokens)
     self._cache_read_total += int(cache_read)
     self._cache_write_total += int(cache_write)
 ```
 
-If multi-iteration accumulation is the actual intent, fix the docstring and add a separate reset hook the adapter calls before each iteration's `record_output_text` loop. Add a regression test using `text="x" * 40` (10 char/4 tokens) plus `input_tokens=10, output_tokens=5` and assert `done.tokens_out == 5` (not 15).
-
-### CR-03: `StreamError.message` passes unredacted SDK exception text through SSE
-
-**File:** `apps/api/backends/openrouter/adapter.py:317, 325, 338, 347`; `apps/api/backends/claude_code/adapter.py:461, 469, 478`; `apps/api/backends/computer_use/adapter.py:543, 551, 561, 570`
-**Issue:** The adapter passes `message=str(exc)` directly into the `StreamError` chunk, which is serialised via `chunk.model_dump_json()` and forwarded to the user's chat UI. `_redact_text`/`RedactionFilter` only run on `logging.LogRecord` instances (see `logging_filter.py:65-87`) — they do NOT touch `ChatChunk` payloads. `openai.APIStatusError` and `anthropic.APIStatusError` both expose `__str__` that includes the request URL and may include the response body. If the provider echoes the API key in an error body (some providers do, e.g. "invalid auth header: Bearer sk-…") or if the request URL contains a token, the key lands in the user-visible `StreamError`. The SECURE-01 logs-redaction guarantee does not extend to SSE chunks.
-
-**Fix:** Apply `_redact_text` to every `StreamError.message` before yielding:
+…but then the char/4 estimate that `record_output_text` produces during the iteration is also added on top. Reset the estimate at the start of each iteration:
 
 ```python
-# At the top of each adapter:
-from apps.api.backends.logging_filter import _redact_text
+def reset_iteration_estimate(self) -> None:
+    """Adapter calls this at the top of each agent-loop iteration."""
+    # Snapshot the current totals so within-iteration char/4 estimates
+    # don't double-count after record_iteration_usage replaces them.
+    self._iteration_baseline_out = self._tokens_out
 
-# In every except block:
-except AuthenticationError as exc:
-    yield StreamError(
-        code="auth_failed",
-        message=_redact_text(str(exc)),
-        retriable=False,
-    )
+def record_iteration_usage(...):
+    # Override the within-iteration estimate, then accumulate.
+    self._tokens_out = self._iteration_baseline_out + int(output_tokens)
+    ...
 ```
 
-OR (more conservative): produce a constant operator-friendly message and log the full `str(exc)` separately:
+**Fix Option B (assume cumulative):** Confirm via live-smoke or Anthropic docs that `final_msg.usage` is cumulative across iterations, then leave the override semantics and add a documentation comment + a multi-iteration regression test that asserts the contract.
 
-```python
-except AuthenticationError as exc:
-    logger.warning("OpenRouter auth failed: %s", exc)  # gets redacted
-    yield StreamError(
-        code="auth_failed",
-        message="Authentication failed — check your API key.",  # constant
-        retriable=False,
-    )
-```
+Either way, add a regression test that runs the adapter with two `tool_use` iterations (e.g. `make_tool_use_stream(...)` × 2 then `end_turn`) and asserts the final `Done.tokens_out` reflects the intended semantics.
 
-The internal-error path (`message=f"{type(exc).__name__}: {exc}"`) is the highest risk and should be redacted unconditionally.
+### WR-03: Adapter still uses deprecated `asyncio.get_event_loop()` for wall-clock time
 
-### CR-04: Pre-commit `no-secrets.sh` regex set drifts from `logging_filter.SECRET_PATTERNS`
+**File:** `apps/api/backends/claude_code/adapter.py:307, 459, 486`
+**Issue:** Three calls to `asyncio.get_event_loop().time()` for latency measurement. Since Python 3.10 `asyncio.get_event_loop()` emits a `DeprecationWarning` when called outside a running coroutine and is scheduled for removal in a future release. While the calls here are inside `stream()` (a coroutine), the idiomatic Python 3.10+ replacement is `asyncio.get_running_loop()` (inside coroutines) or `time.monotonic()` (for plain wall-clock latency). `time.monotonic()` is the standard idiom and decouples latency tracking from the event loop.
 
-**File:** `scripts/no-secrets.sh:14`; `apps/api/backends/logging_filter.py:50-54`
-**Issue:** `logging_filter.py:31-32` documents: "The three patterns intentionally MATCH the pre-commit hook in Plan 04 (`scripts/no-secrets.sh`). Keeping the regex set in sync means the unit-test coverage for one path also protects the other." The actual regex sets disagree on two of three patterns:
-
-| Pattern | logging_filter.py | scripts/no-secrets.sh |
-|---|---|---|
-| Anthropic | `sk-ant-[A-Za-z0-9_-]{8,}` | `sk-ant-[A-Za-z0-9_-]{8,}` (matches) |
-| OpenAI | `sk-[A-Za-z0-9_-]{20,}` (incl. `_-`) | `sk-[A-Za-z0-9]{20,}` (alphanumeric only) |
-| Bearer | `Bearer\s+[A-Za-z0-9_.\-]{20,}` (`\s+` = any whitespace) | `Bearer [A-Za-z0-9_.-]{20,}` (literal space) |
-
-Consequences:
-- An OpenAI key containing `_` or `-` after `sk-` (e.g. `sk-proj_abcdef...20chars`) is NOT caught by the pre-commit hook but IS redacted by the filter — and vice versa: a token with `_` would pass `commit` but be redacted at runtime, an inconsistent contract.
-- A `Bearer\t<token>` (tab) or `Bearer  <token>` (multiple spaces) is redacted by the filter but passes the pre-commit hook unchanged.
-
-**Fix:** Synchronise both regex sets. Recommended unified set:
-
-```bash
-# scripts/no-secrets.sh
-grep -E '(sk-ant-[A-Za-z0-9_-]{8,}|sk-[A-Za-z0-9_-]{20,}|Bearer[[:space:]]+[A-Za-z0-9_.-]{20,})'
-```
-
-```python
-# apps/api/backends/logging_filter.py — already correct, ensure both
-# files reference a shared regex source. Consider lifting the patterns
-# into config/secrets-patterns.txt or a Python module that the shell
-# script reads via `grep -f`.
-```
-
-Add a CI step that loads both regex sets and asserts equivalence so future drift fails the build.
-
-### CR-05: Anthropic-style Bearer headers leave the "Bearer " prefix dangling
-
-**File:** `apps/api/backends/logging_filter.py:50-54`
-**Issue:** `SECRET_PATTERNS` runs in order:
-1. `sk-ant-…` → `***REDACTED-ANTHROPIC***`
-2. `sk-…` → `***REDACTED-OPENAI***`
-3. `Bearer\s+…` → `Bearer ***REDACTED***`
-
-When a log line contains `Bearer sk-ant-api03-XYZ1234567890ABCDEFGHIJKL` (e.g. the actual `Authorization` header the Anthropic SDK constructs), the FIRST pattern matches the body and rewrites it to `Bearer ***REDACTED-ANTHROPIC***`. The result leaks the structure of the auth scheme:
-
-```
-"auth header: Bearer ***REDACTED-ANTHROPIC***"
-```
-
-The literal word `Bearer` is preserved verbatim in the log. While this does NOT leak the key, it leaks the fact that an auth header existed, and downstream regex-scrubbers checking for `Bearer ***REDACTED***` (the Bearer-pattern result) will not match. The unit test `test_redaction_replaces_bearer_tokens` deliberately uses a non-`sk-` payload (line 51) to dodge this case — the failure mode is uncovered.
-
-**Fix:** Either reverse the pattern order (Bearer first, then sk-/sk-ant-), OR change the sk-/sk-ant- replacements to swallow an optional leading `Bearer `:
-
-```python
-SECRET_PATTERNS: Final[list[tuple[re.Pattern[str], str]]] = [
-    # Bearer first so Bearer-prefixed keys redact as a unit.
-    (re.compile(r"Bearer\s+sk-ant-[A-Za-z0-9_-]{8,}"), "Bearer ***REDACTED-ANTHROPIC***"),
-    (re.compile(r"Bearer\s+sk-[A-Za-z0-9_-]{20,}"), "Bearer ***REDACTED-OPENAI***"),
-    (re.compile(r"Bearer\s+[A-Za-z0-9_.\-]{20,}"), "Bearer ***REDACTED***"),
-    (re.compile(r"sk-ant-[A-Za-z0-9_-]{8,}"), "***REDACTED-ANTHROPIC***"),
-    (re.compile(r"sk-[A-Za-z0-9_-]{20,}"), "***REDACTED-OPENAI***"),
-]
-```
-
-Add a regression test: `logger.info("Authorization: Bearer sk-ant-api03-XYZ1234567890ABCDEFGHIJKL")` then assert `"Bearer" not in caplog.text` (or just `"sk-ant-" not in caplog.text` AND `"***REDACTED-ANTHROPIC***" in caplog.text` AND the unredacted "Bearer" prefix is rewritten to a single redaction marker).
-
-## Warnings
-
-### WR-01: Unbounded `asyncio.sleep` in the `wait` action
-
-**File:** `apps/api/backends/computer_use/adapter.py:647-650`
-**Issue:** The `wait` action does `duration = float(params.get("duration", 1.0) or 1.0)` then `await asyncio.sleep(duration)`. There is no upper bound. A model can pass `duration=86400` and pin the stream for 24 hours. The `max_cost_usd` cap does not help (no tokens are consumed during sleep). The `max_steps` cap does not help (this is inside a single step). Only client-side cancellation breaks out.
-
-**Fix:** Clamp to a sane upper bound:
-
-```python
-if action == "wait":
-    raw = float(params.get("duration", 1.0) or 1.0)
-    duration = min(max(raw, 0.0), 30.0)  # cap at 30 s
-    await asyncio.sleep(duration)
-    return (f"Waited {duration}s.", False)
-```
-
-### WR-02: `max_cost_usd=0.0` and `max_steps=0` silently fall back to defaults
-
-**File:** `apps/api/backends/openrouter/adapter.py:197`; `apps/api/backends/claude_code/adapter.py:294-295`; `apps/api/backends/computer_use/adapter.py:262-263`
-**Issue:** All three adapters use `or` to default missing options:
-
-```python
-max_cost_usd = options.max_cost_usd or self._max_cost
-max_steps = options.max_steps or self._max_steps
-```
-
-The `or` operator treats `0.0` (and `0`) as falsy. A caller who wants a zero-cap "dry run" (e.g. emit a `cost_cap_exceeded` immediately to verify wiring) gets the constructor default `0.50` USD instead. This is a footgun for an explicit-control safety knob.
-
-**Fix:** Use `is None` checks:
-
-```python
-max_cost_usd = self._max_cost if options.max_cost_usd is None else options.max_cost_usd
-max_steps = self._max_steps if options.max_steps is None else options.max_steps
-```
-
-### WR-03: `errors.py` modules are dead code — adapters never call `map_provider_error`
-
-**File:** `apps/api/backends/openrouter/errors.py`; `apps/api/backends/claude_code/errors.py`; `apps/api/backends/computer_use/errors.py`
-**Issue:** Every adapter inlines its provider-exception → `StreamError` mapping inside `except` blocks. The shared `map_provider_error` function and `PROVIDER_ERROR_MAP` table are tested in `tests/test_cost_and_errors.py` but NEVER imported by the adapter modules themselves. Each adapter could regress its error mapping without the tests noticing (the tests prove the *mapping module* works, not that the adapter *uses* it).
-
-```bash
-$ grep -rn "from apps.api.backends.openrouter.errors\|from apps.api.backends.claude_code.errors\|from apps.api.backends.computer_use.errors" /apps/api/
-# Only matches in test files — never in adapter.py.
-```
-
-**Fix:** Pick one approach:
-
-1. **Wire the adapters to use `map_provider_error`:**
-
-```python
-# In adapter.py except blocks:
-except (AuthenticationError, APITimeoutError, APIStatusError) as exc:
-    code, message, retriable = map_provider_error(exc)
-    # ... refine 429-vs-other inside the APIStatusError branch
-    yield StreamError(code=code, message=message, retriable=retriable)
-```
-
-2. **Or delete `errors.py` and update the tests** to exercise the adapter's inline mapping directly.
-
-The status quo leaves a maintenance trap.
-
-### WR-04: `asyncio.get_event_loop()` is deprecated since Python 3.10
-
-**File:** `apps/api/backends/openrouter/adapter.py:211, 286, 308`; `apps/api/backends/claude_code/adapter.py:302, 426, 453`; `apps/api/backends/computer_use/adapter.py:271, 511, 534`
-**Issue:** Every adapter uses `asyncio.get_event_loop().time()` for latency measurement. Since Python 3.10, `asyncio.get_event_loop()` emits a `DeprecationWarning` when called from outside a coroutine and was scheduled for removal. The intended replacement when inside a running coroutine is `asyncio.get_running_loop()`. For wall-clock time, `time.monotonic()` is the standard idiom and doesn't couple latency tracking to the event loop.
+This was already noted in the prior review (WR-04). The gap-closure plans did not touch it; flagging again because it remains in the focus scope (`adapter.py`).
 
 **Fix:**
 
 ```python
 import time
 
-# At stream() top:
+# Top of stream():
 start_t = time.monotonic()
 
 # At each measurement point:
 latency_ms = int((time.monotonic() - start_t) * 1000)
 ```
 
-This removes the deprecation entirely.
+### WR-04: Workspace `mkdtemp` runs outside `try/finally` → directory leaks if construction raises
 
-### WR-05: `permission_mode=None` defaults to interactive prompts in non-TTY environments
+**File:** `apps/api/backends/claude_code/adapter.py:295, 327, 516-529`
+**Issue:** `workspace = tempfile.mkdtemp(prefix="pomu-cc-")` runs at line 295. The `try:` block does not begin until line 327, with several constructions in between:
 
-**File:** `apps/api/backends/claude_code/adapter.py:305-310`
-**Issue:** `ClaudeAgentOptions` is built without `permission_mode`, with the comment "defaults to user-controlled". On the installed `claude_agent_sdk==0.1.81`, `permission_mode` defaults to `"default"` (`types.py:1628`), which on the Claude CLI subprocess produces interactive permission prompts for tool invocations. In a Phase 3 FastAPI server context (no TTY, no stdin), the prompt hangs the subprocess until the watchdog or step cap fires. Phase 2 happens to work because the live smoke test runs against a developer's terminal with Claude CLI already configured, but Phase 3 will regress.
+- `ClaudeCodeCostTracker(...)` (line 301-305) — can raise if `pricing` lookup fails
+- `StepCounter(cap=max_steps)` (line 306) — can raise on invalid `max_steps`
+- `asyncio.get_event_loop().time()` (line 307) — can raise `RuntimeError: no current event loop`
+- `ClaudeAgentOptions(...)` (line 310-315) — SDK construction can raise on invalid options
 
-**Fix:** Either pin `permission_mode="acceptEdits"` for production (auto-accept Edit/Write within the allowed-tools sandbox), or expose `permission_mode` as an `AdapterOptions` field with a documented default. Add a non-TTY regression test that spawns the adapter with stdin closed and asserts the stream terminates within `max_steps × 5 s`.
+Any exception in lines 296-326 leaves the temp dir orphaned because the `finally` block (line 516) is bound to the `try:` at line 327 and is never reached. The previous review noted this; the gap-closure plans did not address it.
 
-### WR-06: `PricingTable.get` returns the mutable underlying dict
-
-**File:** `apps/api/backends/pricing.py:80-88`
-**Issue:** `get()` returns `self._table.get(model_id) or self._table["_default"]` — both branches return the actual dict reference inside `self._table`. Callers can mutate the table:
-
-```python
-rates = table.get("openai/gpt-5")
-rates["input_per_mtok"] = 0.0  # poisons every future tracker call
-```
-
-`CostTracker.total()` uses `rates["input_per_mtok"]` directly. A buggy or malicious caller could disable the cost cap by setting both rates to 0.
-
-**Fix:** Return a copy:
+**Fix:** Wrap `mkdtemp` immediately in a try block, or push the workspace setup inside the existing try block and use the `ephemeral_workspace` context manager that already exists in `apps/api/backends/claude_code/workspace.py`:
 
 ```python
-def get(self, model_id: str) -> dict[str, float]:
-    row = self._table.get(model_id) or self._table["_default"]
-    return dict(row)  # defensive copy
+try:
+    if options.cwd:
+        workspace = options.cwd
+        cleanup_workspace = False
+    else:
+        workspace = tempfile.mkdtemp(prefix="pomu-cc-")
+        cleanup_workspace = True
+
+    tracker = ClaudeCodeCostTracker(...)
+    # ... rest of the setup
+    client = self._client_factory(...)
+    # ... rest of the body
+finally:
+    if cleanup_workspace and workspace:
+        shutil.rmtree(workspace, ignore_errors=True)
+    # ... rest of the existing finally
 ```
 
-### WR-07: `_merge_openrouter_snapshot` crashes on entries missing `id`
+### WR-05: Bearer redaction regex matches across newlines — single-line guarantee unenforced
 
-**File:** `apps/api/backends/pricing.py:138`
-**Issue:** Line 138 uses `model["id"]` directly. Earlier in the loop (line 130) `pricing = model.get("pricing") or {}` uses defensive `get`, but the `id` lookup is not guarded. A malformed snapshot entry without `id` raises `KeyError`, which is NOT caught by the surrounding `try/except (TypeError, ValueError)` (lines 133-137). The result is the entire merge aborts mid-stream and the table is left in an inconsistent partial state.
+**File:** `apps/api/backends/logging_filter.py:66`
+**Issue:** The Bearer pattern `re.compile(r"Bearer\s+[A-Za-z0-9_.\-]{20,}")` uses `\s+`, which Python's regex engine treats as "any whitespace character including `\n` and `\t`". On a multi-line log message such as `"Bearer\nsk-XYZABCDEFGHIJKLMNOPQRSTUVWXYZ0123"`, the pattern matches across the newline and redacts as `"Bearer ***REDACTED***"` — collapsing two lines into one (and accidentally consuming the newline). This is unlikely in practice (log records are typically single-line) but it is also unguarded; a multi-line log message with a leading "Bearer" token would silently mangle the second line.
 
-**Fix:**
+The companion `Bearer[[:space:]]+` in `scripts/no-secrets.sh` also matches across whitespace, including tabs and (in some bash builds) newlines, so the shell hook has the same behaviour. This is consistent but undocumented.
+
+**Fix:** Restrict to horizontal whitespace using `[ \t]+` (or `[^\S\r\n]+` to match the spirit of `\s` without newlines):
 
 ```python
-def _merge_openrouter_snapshot(self, snapshot: dict[str, Any]) -> None:
-    for model in snapshot.get("data", []):
-        model_id = model.get("id")
-        if not model_id:
-            continue
-        pricing = model.get("pricing") or {}
-        if "prompt" not in pricing or "completion" not in pricing:
-            continue
-        try:
-            input_per_mtok = float(pricing["prompt"]) * 1_000_000
-            output_per_mtok = float(pricing["completion"]) * 1_000_000
-        except (TypeError, ValueError):
-            continue
-        self._table[model_id] = {
-            "input_per_mtok": input_per_mtok,
-            "output_per_mtok": output_per_mtok,
-        }
+(re.compile(r"Bearer[ \t]+[A-Za-z0-9_.\-]{20,}"), "Bearer ***REDACTED***"),
 ```
 
-### WR-08: `ephemeral_workspace` context manager exists but is unused
+And in the shell script:
 
-**File:** `apps/api/backends/claude_code/workspace.py`; `apps/api/backends/claude_code/adapter.py:286-291`
-**Issue:** `workspace.py` defines `ephemeral_workspace` (and `test_workspace.py` tests it), but the adapter inlines the same mkdtemp/rmtree logic (lines 286-291 and 492-496) with the comment "the inline form yields cleaner exception handling around the SDK calls." Two divergent code paths for the same lifecycle. Future fixes (e.g. CR-04 leak when an exception happens between mkdtemp and the try-block) will likely be applied to only one path. The adapter's inline form lacks the `try/finally` guarantee the context manager provides.
+```bash
+Bearer[[:blank:]]+[A-Za-z0-9_.-]{20,}
+```
 
-**Fix:** Either:
-1. Delete `workspace.py` + `test_workspace.py` and document the inline form as canonical.
-2. Refactor the adapter to use `async with ephemeral_workspace(options.cwd) as (workspace, cleanup_workspace):` and lift the SDK try/except inside the async-with body. The comment about "cleaner exception handling" is no longer accurate — the nested `try/except` is identical either way.
+If the cross-line behaviour is intentional (e.g. the hook is meant to catch a Bearer split across diff context lines), keep `\s+` / `[[:space:]]+` but document why and add a regression test asserting both files agree.
 
-### WR-09: Computer-use `navigate` action allows arbitrary URL schemes
+### WR-06: `Bearer sk-XXX` (non-anthropic) coverage is implicit — no regression test
 
-**File:** `apps/api/backends/computer_use/adapter.py:643-646`; `apps/api/backends/computer_use/screen.py:181-185`
-**Issue:** `screen.goto(url)` passes any string straight to `Page.goto()`. Playwright accepts `file:///etc/passwd`, `chrome://settings`, `data:text/html,…`, and other non-`http(s)` schemes. SECURE-05 (opt-in) is the only gate — once the operator opts in, the model can read arbitrary local files via `file://` navigation + a screenshot. While the model has no `read_file` tool, the screenshot DOES return the rendered file contents as a PNG.
+**File:** `apps/api/backends/tests/test_logging_filter.py:37-59`
+**Issue:** The CR-05 regression test (`test_bearer_prefixed_sk_ant_redacts_as_bearer_unit`) covers `Bearer sk-ant-…` and asserts the Bearer unit redaction. There is no equivalent test for `Bearer sk-…` (non-anthropic), even though the Bearer-first ordering needs to win against the OpenAI `sk-` pattern too. The implementation works (Bearer pattern fires first), but the contract is uncovered by the test suite. A future reorder (Bearer below sk-) would only fail one test, not two.
 
-**Fix:** Add a scheme allow-list in `screen.goto`:
+**Fix:** Add a parallel test:
 
 ```python
-async def goto(self, url: str) -> None:
-    from urllib.parse import urlparse
-    parsed = urlparse(url)
-    if parsed.scheme not in ("http", "https"):
-        raise ValueError(
-            f"Navigation blocked: only http/https URLs allowed (got '{parsed.scheme}')"
-        )
-    assert self._page is not None, "goto called before start()"
-    await self._page.goto(url)
+def test_bearer_prefixed_sk_openai_redacts_as_bearer_unit(caplog) -> None:
+    install_redaction_filter()
+    logger = logging.getLogger("test.bearer_openai")
+    with caplog.at_level(logging.INFO, logger="test.bearer_openai"):
+        logger.info("Authorization: Bearer sk-proj-abcdefghijklmnopqrstuvwxyz0123")
+    assert "sk-proj-" not in caplog.text
+    assert "Bearer ***REDACTED***" in caplog.text
+    assert "***REDACTED-OPENAI***" not in caplog.text
 ```
-
-Add a regression test that asserts `goto("file:///etc/passwd")` raises `ValueError`.
 
 ## Info
 
-### IN-01: `validation_error` is in the D-06 closed vocabulary but never emitted
+### IN-01: `_pending_tool_calls` silently emits `ToolResult` if `ToolResultBlock` arrives before its `ToolUseBlock`
 
-**File:** `apps/api/backends/chunks.py:135`
-**Issue:** The `StreamError.code` literal includes `"validation_error"`, but no adapter ever yields it. Either reserved for Phase 3 (in which case document it in a comment), or dead code.
+**File:** `apps/api/backends/claude_code/adapter.py:397-399`
+**Issue:** If the SDK ever emits a `ToolResultBlock` before the matching `ToolUseBlock` (out-of-order delivery, or a buggy provider replaying an older state), `_pending_tool_calls.pop(tool_use_id, ("", {}))` returns the default — `tool_name = ""`, `tool_input = {}`. The empty `tool_name` falls through to the `ToolResult` branch (line 412+). No logging fires, no error chunk is emitted. The user sees a `ToolResult` chunk for what should have been a `FileDiff`. This is a silent semantic downgrade.
 
-**Fix:** Add a comment line above the literal: `# "validation_error" is reserved for Phase 3 input validation in FastAPI.`
-
-### IN-02: `secrets.choice` over a 32-char alphabet × 6 = 30 bits of entropy
-
-**File:** `apps/api/backends/openrouter/adapter.py:106-116`
-**Issue:** The docstring says "30 bits of entropy which is plenty for de-duplicating tool calls within a single turn." A single turn might have ≤10 tool calls, so 30 bits is overkill. But the inline comment + docstring are accurate. No bug — just an observation that the entropy budget is generous.
-
-**Fix:** No action required. Optionally drop to 4 characters (20 bits) if you want shorter IDs in the UI; OpenAI's own tool-call IDs are typically 24+ characters so 9-char `tc_xxxxxx` is fine.
-
-### IN-03: `Final[list[str]]` annotation does not prevent mutation
-
-**File:** `apps/api/backends/claude_code/adapter.py:175`
-**Issue:** `ALLOWED_TOOLS: Final[list[str]] = ["Read", "Edit", "Write", "Bash", "Glob", "Grep"]` — `Final` prevents reassignment of the *name*, not mutation of the *list*. A future plugin could do `ALLOWED_TOOLS.append("WebSearch")` without a type-checker complaint and silently extend the v1 tool surface. The comment "the `Final` annotation makes the mutability intent explicit" overstates what `Final` provides.
-
-**Fix:** Use a tuple instead — tuples are immutable:
+Out-of-order delivery is unlikely with the streaming SDK but not impossible (e.g. error recovery paths). Adding a `logger.warning(...)` would make this debuggable without changing behaviour:
 
 ```python
-ALLOWED_TOOLS: Final[tuple[str, ...]] = ("Read", "Edit", "Write", "Bash", "Glob", "Grep")
+tool_name, tool_input = _pending_tool_calls.pop(tool_use_id, ("", {}))
+if not tool_name:
+    logger.warning("ToolResultBlock for unknown tool_use_id=%r (out-of-order or missed ToolUseBlock)", tool_use_id)
 ```
 
-The `claude_agent_sdk.ClaudeAgentOptions.allowed_tools` field accepts any sequence so a tuple works.
+### IN-02: `FakeToolResultBlock.content` default is `""` but the real SDK default is `None`
 
-### IN-04: `import os` inside `__init__` (claude_code adapter)
-
-**File:** `apps/api/backends/claude_code/adapter.py:248`
-**Issue:** `os` is imported inside `ClaudeCodeAdapter.__init__` at line 248 even though the surrounding module does not import `os` at the top level. PEP 8 prefers top-of-module imports; the inline import is presumably to defer the lookup until construct time, but `os` is already loaded by the dotenv side-effect in `apps/api/__init__.py:55`.
-
-**Fix:** Move `import os` to the top of `adapter.py` alongside the other stdlib imports.
-
-### IN-05: Comment claims `key.replace` only handles known cases
-
-**File:** `apps/api/backends/computer_use/screen.py:144-152`
-**Issue:** `normalized = key.replace("ctrl", "Control").replace("super", "Meta")` is a naive substring replace. The string `"alt+ctrlw"` would yield `"alt+Controlw"` (unlikely to come from Anthropic, but possible from a malicious prompt that influences the tool args). Also misses `cmd` → `Meta` mapping that some platforms use.
-
-**Fix:** Word-boundary or token-split replacement:
+**File:** `apps/api/backends/claude_code/tests/fakes.py:70-72`
+**Issue:** The fake defaults `content: Any = ""`, but the real SDK's `ToolResultBlock.content` defaults to `None`. The adapter's `getattr(block, "content", "")` masks the difference (both yield falsy values), but if a future change uses `block.content is None` to detect "no content yet", the fake would mismatch. Cosmetic; mark the fake's default to match the SDK so the duck-type stays exact:
 
 ```python
-def _normalize_key(key: str) -> str:
-    parts = key.split("+")
-    mapping = {"ctrl": "Control", "super": "Meta", "cmd": "Meta", "alt": "Alt", "shift": "Shift"}
-    return "+".join(mapping.get(p.lower(), p) for p in parts)
+@dataclass
+class FakeToolResultBlock:
+    tool_use_id: str = ""
+    content: Any = None        # matches the real SDK default
+    is_error: bool = False
 ```
 
-### IN-06: Provider-truth cost cannot trigger cost cap (intentional but undocumented)
+Adjust any test that explicitly passes `content=""` to either leave the default or pass an empty string deliberately.
 
-**File:** `apps/api/backends/openrouter/adapter.py:225-230, 274-283`
-**Issue:** When the final usage chunk lands, the adapter calls `tracker.record_final_usage(...)` (line 226-228) which overrides `_tokens_in`/`_tokens_out`, then immediately `continue`s — skipping the `tracker.over_cap()` check on line 274. The final-cost-based cap is therefore impossible to trigger for OpenRouter. This is probably intentional (the stream is over by the final chunk) but should be documented.
+### IN-03: CI parity step has no timeout — a hanging pytest blocks the whole job
 
-**Fix:** Add a comment next to line 230: `# Final usage chunk — stream is ending anyway, no cap check needed.`
+**File:** `.github/workflows/ci.yml:34-38`
+**Issue:** The "Regex parity check" step has no `timeout-minutes` setting. The default GitHub Actions step timeout (360 minutes) applies. If a future test in `test_logging_filter.py` accidentally hangs (e.g. a regex with catastrophic backtracking on a test input), the entire CI job stalls for six hours before being cancelled. Add a tight bound:
 
-### IN-07: `chunks.py` `image_b64` is `str | None` but `Done.tokens_in` is `int | None` — inconsistent
-
-**File:** `apps/api/backends/chunks.py:101-114, 142-157`
-**Issue:** Both `Screenshot.image_b64` and `Done.tokens_in` accept `None`, but the semantics differ. `Screenshot` mandates EXACTLY ONE of `image_b64`/`image_ref` to be non-None (per the docstring) but Pydantic does not enforce this — a `Screenshot(step=1)` with both fields None validates successfully. Phase 3's STORE-04 swap depends on this invariant.
-
-**Fix:** Add a `model_validator(mode="after")`:
-
-```python
-from pydantic import model_validator
-
-class Screenshot(BaseModel):
-    type: Literal["screenshot"] = "screenshot"
-    step: int
-    image_b64: str | None = None
-    image_ref: str | None = None
-    image_format: Literal["png", "jpeg"] = "png"
-
-    @model_validator(mode="after")
-    def _exactly_one_image_source(self) -> "Screenshot":
-        if (self.image_b64 is None) == (self.image_ref is None):
-            raise ValueError(
-                "Screenshot must set exactly one of image_b64 or image_ref"
-            )
-        return self
+```yaml
+- name: Regex parity check (SECURE-01 + SECURE-02 contract)
+  timeout-minutes: 2
+  run: |
+    uv run pytest -m 'not live' \
+      apps/api/backends/tests/test_logging_filter.py::test_logging_filter_and_no_secrets_regex_parity \
+      -x -q
 ```
 
-Add a unit test that asserts `Screenshot(step=1)` (both None) and `Screenshot(step=1, image_b64="x", image_ref="r")` (both set) raise `ValidationError`.
+The full Phase-2 test step (line 56) should also have a timeout. Not gating because pytest itself rarely hangs, but worth a brief audit pass.
+
+### IN-04: `no-secrets.sh` does not handle `git diff` returning non-zero (e.g. broken pipe)
+
+**File:** `scripts/no-secrets.sh:18, 20-22`
+**Issue:** With `set -o pipefail`, the pipeline `git diff --cached --diff-filter=AM | grep -E '^\+[^+]' | grep -E '(...)'` aborts on the first non-zero exit code. The middle `grep -E '^\+[^+]'` returns 1 if the diff has no `+` lines (e.g. a pure delete commit), which makes the whole pipeline return 1, which under `set -e` aborts the script BEFORE the `if` decides. The `if`'s pipeline return-code is what gets evaluated, so this is actually fine for the `if` branch — but `pipefail` makes the script exit 0 only when no grep ever returned 1 in the chain.
+
+Trace: a pure-delete commit (only `-` lines) produces empty output from the first grep, exit code 1. With `pipefail`, the second grep sees no stdin, exits 1 too. `if pipeline; then ...` then evaluates the final exit code (1) and skips the `then` branch — so the script falls through to `exit 0`. This is correct.
+
+However, if a future change adds another grep or processing step after the pipeline (outside the `if`), `set -e` + `pipefail` would abort. Comment the script to document the expected exit-code behaviour, or wrap the pipeline in `|| true` if the contract is "grep returning empty is not an error":
+
+```bash
+if git diff --cached --diff-filter=AM 2>/dev/null \
+   | grep -E '^\+[^+]' \
+   | grep -E '(...)' > /dev/null 2>&1
+then
+    echo "ERROR: ..."
+    exit 1
+fi
+exit 0
+```
+
+The current script works but is fragile to future edits.
 
 ---
 
-_Reviewed: 2026-05-15T18:30:00Z_
+_Reviewed: 2026-05-15T17:30:00Z_
 _Reviewer: Claude (gsd-code-reviewer)_
 _Depth: standard_
