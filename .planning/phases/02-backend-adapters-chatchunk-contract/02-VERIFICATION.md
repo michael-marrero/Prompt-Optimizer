@@ -1,79 +1,49 @@
 ---
 phase: 02-backend-adapters-chatchunk-contract
-verified: 2026-05-15T18:16:38Z
-status: gaps_found
-score: 18/22 must-haves verified
+verified: 2026-05-15T21:48:03Z
+status: human_needed
+score: 22/22 must-haves verified
 overrides_applied: 0
 re_verification:
-  mode: initial
-gaps:
-  - truth: "Claude Code adapter emits FileDiff chunks for Edit/Write tool results (BACKEND-04, D-02, ROADMAP SC #1, Plan 02-02 must-have)"
-    status: failed
-    reason: "Adapter reads `tool_name` and `input` from `ToolResultBlock`, but the real `claude_agent_sdk==0.1.81` `ToolResultBlock` dataclass has only `tool_use_id`, `content`, `is_error`. `getattr(block, 'tool_name', '')` will always return `''` in production, so `tool_name in ('Edit', 'Write')` is False and the FileDiff branch is unreachable. Tests pass only because `FakeToolResultBlock` adds the non-existent fields."
-    artifacts:
-      - path: "apps/api/backends/claude_code/adapter.py"
-        issue: "Lines 363, 367 read fields that do not exist on the installed SDK's ToolResultBlock. FileDiff is dead code in production."
-      - path: "apps/api/backends/claude_code/tests/fakes.py"
-        issue: "FakeToolResultBlock adds tool_name and input fields that mask the bug."
-    missing:
-      - "Track tool_use_id → (tool_name, input) at ToolUseBlock emit site and look up by tool_use_id on the matching ToolResultBlock."
-      - "Update FakeToolResultBlock to drop tool_name/input so unit tests exercise the same lookup path as production."
-      - "Add a regression test that verifies FileDiff emission against a FakeToolResultBlock with only the real SDK's three fields."
-  - truth: "ComputerUseCostTracker.record_iteration_usage overrides the running token estimate with provider-authoritative counts (Plan 02-03 cost-accounting contract; ROADMAP SC #2 cap arithmetic correctness)"
-    status: failed
-    reason: "Method docstring claims 'Override the running estimate' but implementation uses `+=`, causing per-iteration text_delta char/4 estimates to be summed with the authoritative Anthropic usage block. Inflates both Done.tokens_out and the over_cap() arithmetic. Reproduced: text='x'*40 (10 char/4 tokens) + record_iteration_usage(output_tokens=5) yields tokens_out=15, not 5."
-    artifacts:
-      - path: "apps/api/backends/computer_use/cost.py"
-        issue: "Lines 114-115 use `+=` for input_tokens/output_tokens; the OpenRouter and Claude Code trackers correctly use `=` (override semantics)."
-    missing:
-      - "Change `self._tokens_in += int(input_tokens)` to `self._tokens_in = int(input_tokens)` (and same for `_tokens_out`)."
-      - "Add a regression test using text='x'*40 plus record_iteration_usage(input_tokens=10, output_tokens=5) and assert `tokens_in == 10` and `tokens_out == 5`."
-  - truth: "Pre-commit `no-secrets.sh` regex set MATCHES `logging_filter.SECRET_PATTERNS` (SECURE-01/SECURE-02 contract — docstring asserts the two regex sets are intentionally synchronised)"
-    status: failed
-    reason: "Two of three patterns differ. OpenAI: filter uses `sk-[A-Za-z0-9_-]{20,}` (incl. `_` / `-`), hook uses `sk-[A-Za-z0-9]{20,}` (alphanumeric only). Bearer: filter uses `\\s+` (any whitespace), hook uses literal space. Verified: a key like `sk-AAAAA_AAAAAAAAAAAAAAAAAA` is redacted by the filter but NOT blocked by the pre-commit hook. Bearer with tab redacts but does not block."
-    artifacts:
-      - path: "scripts/no-secrets.sh"
-        issue: "Line 14 — three locked D-09 regex patterns must match logging_filter.SECRET_PATTERNS exactly."
-      - path: "apps/api/backends/logging_filter.py"
-        issue: "Lines 50-54 declare the source-of-truth patterns whose alphabets/whitespace differ from the shell script."
-    missing:
-      - "Synchronise both regex sets to the unified `(sk-ant-[A-Za-z0-9_-]{8,}|sk-[A-Za-z0-9_-]{20,}|Bearer[[:space:]]+[A-Za-z0-9_.-]{20,})` form."
-      - "Add a CI step (or unit test) that loads both regex sets and asserts equivalence to catch future drift."
-  - truth: "Logger redaction guarantees stay coherent for canonical `Authorization: Bearer sk-ant-…` headers (SECURE-01)"
-    status: failed
-    reason: "Pattern order causes mis-redaction. `sk-ant-…` fires before `Bearer\\s+…`, so `Bearer sk-ant-api03-XYZ1234567890ABCDEFGHIJKL` rewrites to `Bearer ***REDACTED-ANTHROPIC***` — the `Bearer` literal stays attached. Downstream pattern-matchers looking for `Bearer ***REDACTED***` (the Bearer-branch result) will miss this case. Reproduced live; the existing unit test deliberately uses a non-`sk-` payload to dodge the issue."
-    artifacts:
-      - path: "apps/api/backends/logging_filter.py"
-        issue: "SECRET_PATTERNS list at lines 50-54 — order makes the sk-ant- rule strip the auth-scheme prefix but leave `Bearer ` verbatim."
-    missing:
-      - "Reorder patterns (Bearer-prefixed forms FIRST), or add Bearer-prefixed sk-ant-/sk- variants whose replacement swallows the leading `Bearer\\s+`."
-      - "Add a regression test asserting `logger.info('Authorization: Bearer sk-ant-…')` produces no literal `Bearer` followed by `***REDACTED-…***`."
+  mode: re-verification
+  previous_status: gaps_found
+  previous_score: 18/22
+  previous_verified_at: 2026-05-15T18:16:38Z
+  gaps_closed:
+    - "Truth 21 (CR-01) — Claude Code adapter emits FileDiff for Edit/Write tool results via _pending_tool_calls lookup"
+    - "Truth 22 (CR-02) — ComputerUseCostTracker.record_iteration_usage now OVERRIDES (=) running token tally"
+    - "Truth 19 (CR-04) — scripts/no-secrets.sh regex set matches logging_filter.SECRET_PATTERNS alphabets exactly"
+    - "Truth 20 (CR-05) — Bearer-prefixed sk-ant-… redacts as a single `Bearer ***REDACTED***` unit"
+  gaps_remaining: []
+  regressions: []
 human_verification:
   - test: "End-to-end OpenRouter live smoke against the real API"
     expected: "`OPENROUTER_API_KEY=… uv run pytest -m live apps/api/backends/openrouter/tests/test_live.py -x` produces at least one TextDelta and a terminal Done with `cost_usd > 0`. BACKEND-03 / ROADMAP SC #1."
     why_human: "Hits a paid provider; BYOK required; non-deterministic completion text — cannot run automatically without operator approval."
   - test: "End-to-end Claude Code live smoke (build hello.py in tmp workspace)"
-    expected: "`ANTHROPIC_API_KEY=… uv run pytest -m live apps/api/backends/claude_code/tests/test_live.py -x` produces at least one FileDiff and a terminal Done with `total_cost_usd > 0`. BACKEND-04 / ROADMAP SC #1. NOTE: CR-01 in `gaps:` predicts this test will FAIL until the ToolResultBlock field bug is fixed."
+    expected: "`ANTHROPIC_API_KEY=… uv run pytest -m live apps/api/backends/claude_code/tests/test_live.py -x` produces at least one FileDiff and a terminal Done with `total_cost_usd > 0`. BACKEND-04 / ROADMAP SC #1. Plan 02-05 (CR-01) closure makes this branch reachable in production for the first time — this is the canonical live confirmation."
     why_human: "Spawns the real `claude` subprocess; BYOK required; mutates a tmp file."
   - test: "End-to-end computer-use live smoke (navigate https://example.com)"
     expected: "`COMPUTER_USE_OPT_IN=1 ANTHROPIC_API_KEY=… uv run pytest -m live apps/api/backends/computer_use/tests/test_live.py -x` produces at least one Screenshot and a ToolCall and a terminal Done with `cost_usd > 0`. BACKEND-05 / ROADMAP SC #1."
     why_human: "Launches real Chromium + paid provider call; requires double opt-in."
-  - test: "Pre-commit deliberate-paste live block"
-    expected: "`echo 'sk-ant-AAAAAAAAAAAAAAAAAAAA' >> deleteme.tmp && git add deleteme.tmp && git commit` is BLOCKED by the no-secrets hook. SECURE-02."
-    why_human: "Tests the actual git-staging hook interaction, not the script in isolation. Plan SUMMARY records this manual outcome; re-run on demand."
+  - test: "Pre-commit deliberate-paste live block (refresh after CR-04 closure)"
+    expected: "Three staged-secret reproductions are now BLOCKED end-to-end via the real `git commit` flow: (a) `sk-ant-AAAAAAAAAAAAAAAAAAAA`, (b) `sk-AAAAA_AAAAAAAAAAAAAAAAAA` (CR-04 underscore-bearing OpenAI), (c) `Bearer\\t<token>` (CR-04 tab-separated header). SECURE-02. Plan 02-07 (CR-04) SUMMARY records the bash-level outcomes; this human-verification item confirms the full pre-commit hook still wires through."
+    why_human: "Tests the actual git-staging hook interaction, not the script in isolation. Plan SUMMARY records the bash-script outcomes after the fix; recommend re-running the end-to-end `git commit` flow on demand."
 ---
 
 # Phase 02: Backend Adapters & ChatChunk Contract Verification Report
 
-**Phase Goal:** Three async backend adapters (OpenRouter via OpenAI SDK pointed at OpenRouter, Claude Code SDK, Anthropic computer-use) implementing a common Protocol that streams the ChatChunk discriminated union. Per-turn cost cap, 2-second cancellation budget, KeyStore + RedactionFilter, PricingTable, CostTracker, CI enforcement of all invariants.
+**Phase Goal:** Three backend adapters (OpenRouter, Claude Code, computer-use) each implement the `BackendAdapter` Protocol and stream a single `ChatChunk` discriminated union. Per-turn cost caps, per-iteration step caps, key redaction, computer-use opt-in, and the `claude-agent-sdk` SDK pin are all enforced from the adapter layer — no UI yet.
 
-**Verified:** 2026-05-15T18:16:38Z
-**Status:** gaps_found
-**Re-verification:** No — initial verification
+**Verified:** 2026-05-15T21:48:03Z
+**Status:** human_needed
+**Re-verification:** Yes — after gap closure (prior status: gaps_found, prior score: 18/22)
 
-The codebase ships the architecture intended by the phase: 3 adapter packages (`openrouter/`, `claude_code/`, `computer_use/`), shared Wave 0 modules (`chunks.py`, `protocol.py`, `cost.py`, `pricing.py`, `keystore.py`, `logging_filter.py`), a 13-row + `_default` `config/pricing.json`, `.pre-commit-config.yaml` with two LOCAL hooks, an extended `.github/workflows/ci.yml`, and the D-19 shared parametric contract suite. Test state at verification time: `pytest -m 'not live' apps/api/backends` = 129 passed, 1 skipped; `test_adapter_contract.py` = 17 passed + 1 intentional skip; Phase 1 `test_decide_smoke.py` D-18 guard remains green.
+The codebase ships the architecture intended by the phase: 3 adapter packages (`openrouter/`, `claude_code/`, `computer_use/`), shared Wave 0 modules (`chunks.py`, `protocol.py`, `cost.py`, `pricing.py`, `keystore.py`, `logging_filter.py`), a 13-row + `_default` `config/pricing.json`, `.pre-commit-config.yaml` with two LOCAL hooks, an extended `.github/workflows/ci.yml` (now with a dedicated `Regex parity check` step from Plan 02-07), and the D-19 shared parametric contract suite. After three gap-closure plans (02-05, 02-06, 02-07), the full non-live test suite is GREEN: `uv run pytest -m 'not live'` = **233 passed, 2 skipped, 3 deselected** in 79.39 s. All four code-level defects from the prior verification (CR-01 / CR-02 / CR-04 / CR-05) are resolved.
 
-However, four code-level defects (3 of which 02-REVIEW.md classified as Critical CR-01/CR-02/CR-04/CR-05) **invalidate documented must-have truths**. CR-03 and the warnings are noted as advisory follow-ups; the four below are blocking gaps because the actual codebase does not satisfy the phase contract they claim.
+This re-verification adopted the optimisation mandated by Step 0 of the goal-backward methodology: the four previously-FAILED truths received full 3-level re-verification (existence + substantive + wiring + behavioral spot-check); the eighteen previously-VERIFIED truths got quick regression checks (import smokes + key constant reads + counts) only. No regressions were detected in any of the eighteen.
+
+All twenty-two observable truths are now VERIFIED. Status is `human_needed` because four items still require BYOK / external-service operator approval — those four human-verification commands are unchanged in shape from the prior report but two of them are sharper now: Truth 21 (Claude Code FileDiff) becomes a meaningful live confirmation rather than a predicted failure, and Truth 19 (pre-commit deliberate-paste) gets two additional regression reproductions (underscore-bearing OpenAI key + tab-separated Bearer) that previously slipped through.
 
 ## Goal Achievement
 
@@ -81,175 +51,186 @@ However, four code-level defects (3 of which 02-REVIEW.md classified as Critical
 
 | # | Truth | Status | Evidence |
 |---|-------|--------|----------|
-| 1 | ROADMAP SC #1 — Per-adapter CLI `python -m apps.api.backends.<backend> --prompt "..."` is callable and streams ChatChunk JSON lines | VERIFIED | All three `--help` invocations succeed (verified live). `__main__.py` exists for each adapter; each parses `--prompt`, `--model`, `--max-cost-usd`, `--max-steps`. CLI smoke is gated on real keys for full end-to-end, but the help surface and entry point are wired. |
-| 2 | ROADMAP SC #2(a) — Per-turn USD cap of $0.50 aborts mid-stream and emits `StreamError` + `Done` | VERIFIED | D-19 `test_cost_cap_aborts[openrouter|claude_code|computer_use]` all 3 PASS. `DEFAULT_PER_TURN_COST_USD = 0.50` in `apps/api/backends/cost.py:42`. Each adapter checks `tracker.over_cap()` and emits `StreamError(code="cost_cap_exceeded")` before `break`. |
-| 3 | ROADMAP SC #2(b) — Claude Code stops at 25 tool calls; computer-use at 15 steps | VERIFIED | `claude_code/step_counter.py:DEFAULT_STEP_CAP = 25`; `computer_use/step_counter.py:DEFAULT_STEP_CAP = 15`. D-19 `test_step_cap_aborts[claude_code|computer_use]` PASS; openrouter intentionally skips ("N/A single round-trip"). |
-| 4 | ROADMAP SC #2(c) — Cancellation propagates within 2 seconds | VERIFIED | D-19 `test_cancellation_within_2_seconds[*]` all 3 PASS with `@pytest.mark.timeout(2)`. Every adapter implements `except asyncio.CancelledError → yield StreamError("cancelled") + Done → raise` per PEP 789. `finally` blocks abort the in-flight transport (`in_flight.close()` / `client.interrupt() + disconnect()` / `screen.aclose()`). |
-| 5 | ROADMAP SC #3 — Logger redaction installed at process import time; rewriting `sk-ant-…`, `sk-…`, `Bearer …` to `***REDACTED***` before any handler sees the record | VERIFIED (with caveats — see Truth 19, 20) | `apps/api/__init__.py:59` calls `install_redaction_filter()` at import. Smoke test passes: `sk-ant-A...` → `***REDACTED-ANTHROPIC***`, `sk-A...` → `***REDACTED-OPENAI***`, `Bearer A...` → `Bearer ***REDACTED***`. **CAVEAT (CR-05):** `Bearer sk-ant-...` mis-redacts to `Bearer ***REDACTED-ANTHROPIC***` — Bearer literal preserved (see Truth 20). |
-| 6 | ROADMAP SC #3 — BYOK key store holds keys in process memory + optional `keyring`; never on disk | VERIFIED | `apps/api/backends/keystore.py` — `KeyStore.set()` writes to `self._memory: dict[str, str]`; only writes to `_keyring.set_password()` when `use_keyring=True` was opted in. `KeyStore(use_keyring=True)` raises `RuntimeError` with `uv sync --extra keyring` message when the extra is absent (D-10). 8 unit tests pass. |
-| 7 | ROADMAP SC #4 — CI smoke test asserts `from claude_agent_sdk import ClaudeAgentOptions` succeeds and `claude-code-sdk` is not in `uv.lock` (OSS-06) | VERIFIED | `.github/workflows/ci.yml:34-40` contains both checks. `grep -c '"claude-code-sdk"' uv.lock` returns 0 (verified). Import smoke `from claude_agent_sdk import ClaudeAgentOptions` returns OK (verified live). Pre-commit hook + CI step + uv.lock grep = triad enforcement. |
-| 8 | ROADMAP SC #4 — OpenRouter requests carry `HTTP-Referer` and `X-Title` headers | VERIFIED | `apps/api/backends/openrouter/adapter.py:79-80` declares the constants; `_default_client_factory` (lines 163-179) injects them via `default_headers={...}` on the `AsyncOpenAI` ctor. Pitfall-3 regression test `test_default_headers_set_on_constructor` passes. |
-| 9 | ROADMAP SC #4 — `CLAUDE_ENABLE_STREAM_WATCHDOG=1` set in the adapter's environment-bootstrapping code (BACKEND-09) | VERIFIED | `apps/api/backends/claude_code/__init__.py` calls `os.environ.setdefault("CLAUDE_ENABLE_STREAM_WATCHDOG", "1")`. Smoke test: `import apps.api.backends.claude_code; os.environ['CLAUDE_ENABLE_STREAM_WATCHDOG']` returns `'1'` (verified live). `setdefault` semantics also tested — if pre-set to `"0"`, value stays `"0"`. |
-| 10 | ROADMAP SC #5 — Computer-use adapter raises startup error unless `COMPUTER_USE_OPT_IN=1` (SECURE-05) | VERIFIED | `apps/api/backends/computer_use/adapter.py:217-223` raises `RuntimeError("computer-use is OFF — set COMPUTER_USE_OPT_IN=1 …")` BEFORE the api-key check and BEFORE any provider client. 4 `test_optin.py` tests pass; verified live by unsetting the env var and constructing the adapter. |
-| 11 | ROADMAP SC #5 — Claude Code adapter uses per-thread ephemeral workspace by default, with opt-in `cwd` flag (BACKEND-08) | VERIFIED | `apps/api/backends/claude_code/adapter.py:286-291` — `options.cwd` is honored verbatim when provided; otherwise `tempfile.mkdtemp(prefix="pomu-cc-")` and `shutil.rmtree` in `finally`. ROADMAP SC #5 is annotated (B1 fix) that `pomu-cc-` is the Phase 2 placeholder for the Phase 3+ `~/.prompt-optimizer/workspaces/<thread_id>/` target — annotation present and grep-confirmed in ROADMAP.md. |
-| 12 | ROADMAP SC #5 — Pre-commit hook blocks commits whose staged content matches `sk-` or `sk-ant-` (SECURE-02) | VERIFIED (with drift — see Truth 19) | `.pre-commit-config.yaml` declares both hooks; `scripts/no-secrets.sh` is executable and reads `git diff --cached`. `uv run pre-commit run --all-files` exits 0 on a clean tree. **CAVEAT (CR-04):** the regex set DRIFTS from `logging_filter.SECRET_PATTERNS` (see Truth 19). |
-| 13 | BACKEND-01 — `ChatChunk` is a 7-variant discriminated union via `Annotated[Union[...], Field(discriminator="type")]` + `TypeAdapter` | VERIFIED | `apps/api/backends/chunks.py:167-184` — exactly 7 variants (`TextDelta | ToolCall | ToolResult | FileDiff | Screenshot | StreamError | Done`); `chat_chunk_adapter = TypeAdapter(ChatChunk)`. Round-trip smoke: `chat_chunk_adapter.validate_python({"type":"text_delta","text":"hi"})` returns `TextDelta(text="hi")` — verified live. 16 unit tests pass. REQUIREMENTS.md BACKEND-01 wording reconciled to include `ToolResult` per D-02 (Plan 02-04 Task 3). |
-| 14 | BACKEND-02 — Common `BackendAdapter` Protocol with `async def stream(prompt, history, options) -> AsyncIterator[ChatChunk]` | VERIFIED | `apps/api/backends/protocol.py:72-86` — single-method `typing.Protocol`. All three adapter classes (`OpenRouterAdapter`, `ClaudeCodeAdapter`, `ComputerUseAdapter`) expose a matching `async def stream(self, prompt, history, options)` signature; structurally type-compatible. D-19 contract suite parametrises across them. |
-| 15 | BACKEND-03 — OpenRouter adapter uses AsyncOpenAI pointed at `https://openrouter.ai/api/v1`, sets `stream_options={"include_usage": True}` | VERIFIED | `OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"` at line 78. Line 217 passes `stream_options={"include_usage": True}` to `chat.completions.create()`. Pitfall-1 regression `test_stream_options_include_usage_set` passes. |
-| 16 | BACKEND-04(partial) — Claude Code adapter uses `claude_agent_sdk.ClaudeSDKClient` (NOT deprecated `claude-code-sdk`, NOT standalone `query()`) | VERIFIED | `apps/api/backends/claude_code/adapter.py:72-85` imports from `claude_agent_sdk`. Lines 313-319 use `ClaudeSDKClient.connect/query/receive_response` (NOT `query()` standalone). Pitfall-2 regression `test_uses_claudesdkclient_not_query_function` passes. `grep -q "claude_code_sdk"` against adapter.py returns 0. |
-| 17 | BACKEND-05 — Computer-use adapter uses `computer_20251124` tool + `computer-use-2025-11-24` beta header on Claude Opus 4.7 / Sonnet 4.6 | VERIFIED | `BETA_HEADER = "computer-use-2025-11-24"` at line 115. Tool spec at lines 277-285 includes `"type": "computer_20251124"`, `display_width_px=1280`, `display_height_px=800`. `client.beta.messages.stream(..., betas=[BETA_HEADER])` at line 338. T2 unit test asserts the recorded kwargs. |
-| 18 | BACKEND-06 / BACKEND-07 — D-19 6 invariants × 3 adapters | VERIFIED | `apps/api/backends/tests/test_adapter_contract.py` collects 18 cases; 17 pass + 1 intentional N/A skip for `step_cap_aborts[openrouter]`. Covers: happy path, cost cap, step cap, cancellation, terminal Done, missing-key raise — all 3 adapters. |
-| 19 | **SECURE-02 contract — pre-commit `no-secrets.sh` regex set MATCHES `logging_filter.SECRET_PATTERNS`** (CR-04) | FAILED | Hook uses `sk-[A-Za-z0-9]{20,}` (no `_-`); filter uses `sk-[A-Za-z0-9_-]{20,}`. Hook uses literal space in `Bearer `; filter uses `\s+`. A key like `sk-AAAAA_AAAAAAAAAAAAAA…` is redacted at runtime but **not blocked** at commit time — verified live with two `re.compile` checks. The `logging_filter.py:31-32` docstring explicitly claims the regex sets are intentionally synchronised. |
-| 20 | **SECURE-01 — `Bearer sk-ant-…` redacts as a single `Bearer ***REDACTED-…***` unit** (CR-05) | FAILED | Pattern order (`sk-ant-` first, `Bearer` last) means a canonical Anthropic Authorization header rewrites to `Bearer ***REDACTED-ANTHROPIC***`. The `Bearer` literal prefix is preserved verbatim — verified live. Existing `test_redaction_replaces_bearer_tokens` deliberately uses a non-`sk-` payload, dodging the regression. |
-| 21 | **BACKEND-04 — Adapter emits `FileDiff` chunks for `Edit`/`Write` tool results** (CR-01) | FAILED | The real `claude_agent_sdk==0.1.81 ToolResultBlock` has only `tool_use_id`, `content`, `is_error` — verified via `dataclasses.fields(ToolResultBlock)` against the installed SDK. The adapter at lines 363, 367 reads `tool_name` and `input` via `getattr(..., default)` — defaults always fire in production, so the `tool_name in ("Edit", "Write")` branch is unreachable. FileDiff cannot be produced from real SDK events. Unit tests mask the bug because `FakeToolResultBlock` adds the missing fields. Phase 5's `CodeBubble` UI depends on FileDiff emission. |
-| 22 | **Computer-use cost-tracking arithmetic — `record_iteration_usage` overrides the running estimate** (CR-02) | FAILED | `apps/api/backends/computer_use/cost.py:114-115` use `+=` instead of `=`. Verified live: `record_output_text('x'*40)` adds 10 char/4 tokens, then `record_iteration_usage(input_tokens=10, output_tokens=5)` produces `tokens_out=15`, not the docstring-promised `5`. Inflates `Done.tokens_out` AND the cap arithmetic that drives mid-stream `cost_cap_exceeded` decisions. |
+| 1 | ROADMAP SC #1 — Per-adapter CLI `python -m apps.api.backends.<backend> --prompt "..."` is callable and streams ChatChunk JSON lines | VERIFIED | All three `--help` invocations succeed (verified live this run: `uv run python -m apps.api.backends.{openrouter,claude_code,computer_use} --help` each prints usage with `--prompt`, `--model`, `--max-cost-usd`, `--max-steps`; `claude_code` also offers `--cwd`). |
+| 2 | ROADMAP SC #2(a) — Per-turn USD cap of $0.50 aborts mid-stream and emits `StreamError` + `Done` | VERIFIED | D-19 `test_cost_cap_aborts[openrouter|claude_code|computer_use]` all 3 PASS this run (17 of 18 contract cases passed; the 1 skip is `step_cap_aborts[openrouter]` intentional N/A). `DEFAULT_PER_TURN_COST_USD = 0.5` confirmed live. CR-02 cap-arithmetic correction (Plan 02-06) restores the cap to fire on the authoritative provider numbers rather than the inflated estimate. |
+| 3 | ROADMAP SC #2(b) — Claude Code stops at 25 tool calls; computer-use at 15 steps | VERIFIED | `claude_code/step_counter.py:DEFAULT_STEP_CAP = 25`; `computer_use/step_counter.py:DEFAULT_STEP_CAP = 15` (smoke-confirmed this run). D-19 `test_step_cap_aborts[claude_code|computer_use]` PASS; openrouter intentionally skips. |
+| 4 | ROADMAP SC #2(c) — Cancellation propagates within 2 seconds | VERIFIED | D-19 `test_cancellation_within_2_seconds[*]` all 3 PASS with `@pytest.mark.timeout(2)`. Every adapter implements `except asyncio.CancelledError → yield StreamError("cancelled") + Done → raise` per PEP 789; `finally` blocks call `client.interrupt() + disconnect()` / `screen.aclose()`. |
+| 5 | ROADMAP SC #3 — Logger redaction installed at process import time; rewriting `sk-ant-…`, `sk-…`, `Bearer …` to `***REDACTED***` before any handler sees the record | VERIFIED | `apps/api/__init__.py:59` calls `install_redaction_filter()` at import (unchanged). Smoke test this run, **including the previously-failing CR-05 reproduction**: `Authorization: Bearer sk-ant-api03-XYZ1234567890ABCDEFGHIJKL` → `Authorization: Bearer ***REDACTED***` (single unit; no exposed Bearer literal alongside the anthropic marker). Plan 02-07 reordered `SECRET_PATTERNS` (Bearer FIRST). |
+| 6 | ROADMAP SC #3 — BYOK key store holds keys in process memory + optional `keyring`; never on disk | VERIFIED | `KeyStore.set()` writes to `self._memory: dict[str, str]`; only writes to `_keyring.set_password()` when `use_keyring=True`. Tests pass (`keystore.py` regressions stable in this run's 233-pass total). |
+| 7 | ROADMAP SC #4 — CI smoke test asserts `from claude_agent_sdk import ClaudeAgentOptions` succeeds and `claude-code-sdk` is not in `uv.lock` (OSS-06) | VERIFIED | `.github/workflows/ci.yml` retains both checks; `grep -q '"claude-code-sdk"' uv.lock` returns exit 1 (absent) — verified live this run. |
+| 8 | ROADMAP SC #4 — OpenRouter requests carry `HTTP-Referer` and `X-Title` headers | VERIFIED | `openrouter/adapter.py` declares `OPENROUTER_HTTP_REFERER` / `OPENROUTER_X_TITLE` constants; `_default_client_factory` injects them via `default_headers={...}`. Pitfall-3 regression test `test_default_headers_set_on_constructor` passes in this run's 233-pass total. |
+| 9 | ROADMAP SC #4 — `CLAUDE_ENABLE_STREAM_WATCHDOG=1` set in the adapter's environment-bootstrapping code (BACKEND-09) | VERIFIED | `apps/api/backends/claude_code/__init__.py` calls `os.environ.setdefault("CLAUDE_ENABLE_STREAM_WATCHDOG", "1")`. Live smoke: `import apps.api.backends.claude_code; os.environ['CLAUDE_ENABLE_STREAM_WATCHDOG']` returns `'1'` — verified this run. |
+| 10 | ROADMAP SC #5 — Computer-use adapter raises startup error unless `COMPUTER_USE_OPT_IN=1` (SECURE-05) | VERIFIED | `computer_use/adapter.py` raises `RuntimeError("computer-use is OFF — set COMPUTER_USE_OPT_IN=1 …")` BEFORE the api-key check and BEFORE any provider client. 4 `test_optin.py` tests stable in this run's 233-pass total. |
+| 11 | ROADMAP SC #5 — Claude Code adapter uses per-thread ephemeral workspace by default, with opt-in `cwd` flag (BACKEND-08) | VERIFIED | `claude_code/adapter.py:291-296` — `options.cwd` is honored verbatim when provided; otherwise `tempfile.mkdtemp(prefix="pomu-cc-")` and `shutil.rmtree` in `finally`. ROADMAP B1 annotation present (`pomu-cc-` is Phase 2 placeholder for the Phase 3+ `~/.prompt-optimizer/workspaces/<thread_id>/` target). |
+| 12 | ROADMAP SC #5 — Pre-commit hook blocks commits whose staged content matches `sk-` or `sk-ant-` (SECURE-02) | VERIFIED | `.pre-commit-config.yaml` declares both hooks; `scripts/no-secrets.sh` is executable. **CR-04 closure (Plan 02-07)** unified the script's regex with `logging_filter.SECRET_PATTERNS` — `sk-[A-Za-z0-9_-]{20,}` and `Bearer[[:space:]]+[A-Za-z0-9_.-]{20,}`. `uv run pre-commit run --all-files` exits 0 on clean tree this run. |
+| 13 | BACKEND-01 — `ChatChunk` is a 7-variant discriminated union via `Annotated[Union[...], Field(discriminator="type")]` + `TypeAdapter` | VERIFIED | `chunks.py` exposes exactly 7 variants; `chat_chunk_adapter = TypeAdapter(ChatChunk)`. Round-trip smoke this run: `chat_chunk_adapter.validate_python({"type":"text_delta","text":"hi"})` returns `TextDelta(text='hi')`. REQUIREMENTS.md BACKEND-01 wording reconciled to include `ToolResult` per D-02 (Plan 02-04). |
+| 14 | BACKEND-02 — Common `BackendAdapter` Protocol with `async def stream(prompt, history, options) -> AsyncIterator[ChatChunk]` | VERIFIED | `protocol.py` defines a single-method `typing.Protocol`. All three adapter classes (`OpenRouterAdapter`, `ClaudeCodeAdapter`, `ComputerUseAdapter`) expose a matching signature; D-19 contract suite parametrises across them (17/18 PASS this run, 1 intentional N/A skip). |
+| 15 | BACKEND-03 — OpenRouter adapter uses AsyncOpenAI pointed at `https://openrouter.ai/api/v1`, sets `stream_options={"include_usage": True}` | VERIFIED | `OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"` constant present; `stream_options={"include_usage": True}` passed to `chat.completions.create()`. Pitfall-1 regression `test_stream_options_include_usage_set` passes in this run's 233-pass total. |
+| 16 | BACKEND-04(partial) — Claude Code adapter uses `claude_agent_sdk.ClaudeSDKClient` (NOT deprecated `claude-code-sdk`, NOT standalone `query()`) | VERIFIED | `claude_code/adapter.py:77-90` imports from `claude_agent_sdk`. Lines 328-334 use `ClaudeSDKClient.connect/query/receive_response` (NOT `query()` standalone). Pitfall-2 regression `test_uses_claudesdkclient_not_query_function` passes in this run's 233-pass total. |
+| 17 | BACKEND-05 — Computer-use adapter uses `computer_20251124` tool + `computer-use-2025-11-24` beta header on Claude Opus 4.7 / Sonnet 4.6 | VERIFIED | `BETA_HEADER = "computer-use-2025-11-24"` declared; tool spec includes `"type": "computer_20251124"`, `display_width_px=1280`, `display_height_px=800`. `client.beta.messages.stream(..., betas=[BETA_HEADER])` plumbed. |
+| 18 | BACKEND-06 / BACKEND-07 — D-19 6 invariants × 3 adapters | VERIFIED | `apps/api/backends/tests/test_adapter_contract.py` collects 18 cases; **17 pass + 1 intentional N/A skip** for `step_cap_aborts[openrouter]` (single round-trip — no in-loop step cap). Verified this run via `uv run pytest -m 'not live' apps/api/backends/tests/test_adapter_contract.py -v`. |
+| 19 | **SECURE-02 contract — pre-commit `no-secrets.sh` regex set MATCHES `logging_filter.SECRET_PATTERNS`** (CR-04 closure) | VERIFIED | `scripts/no-secrets.sh` line 22 grep regex now reads `(sk-ant-[A-Za-z0-9_-]{8,}|sk-[A-Za-z0-9_-]{20,}|Bearer[[:space:]]+[A-Za-z0-9_.-]{20,})` — sk- alphabet gains `_-`; Bearer literal space becomes `[[:space:]]+`. **Closed by Plan 02-07 (commit `e4383e5`).** New `test_logging_filter_and_no_secrets_regex_parity` reads the script verbatim and asserts each of the 3 sub-patterns appears (after `[[:space:]]+` → `\s+` translation) in `SECRET_PATTERNS`. Test passes this run. CI workflow has a dedicated `Regex parity check (SECURE-01 + SECURE-02 contract)` step at line 34 that runs only that test for one-line failure visibility on future drift. |
+| 20 | **SECURE-01 — `Bearer sk-ant-…` redacts as a single `Bearer ***REDACTED***` unit** (CR-05 closure) | VERIFIED | `SECRET_PATTERNS` reordered to put Bearer FIRST. Live verified this run: `_redact_text('Authorization: Bearer sk-ant-api03-XYZ1234567890ABCDEFGHIJKL')` returns `'Authorization: Bearer ***REDACTED***'` (NOT `'Bearer ***REDACTED-ANTHROPIC***'`). **Closed by Plan 02-07 (commit `e4383e5`).** Regression test `test_bearer_prefixed_sk_ant_redacts_as_bearer_unit` asserts the canonical Bearer-anthropic form redacts as a single unit. `SECRET_PATTERNS[0][0].pattern` = `Bearer\\s+[A-Za-z0-9_.\\-]{20,}` (verified live). |
+| 21 | **BACKEND-04 — Adapter emits `FileDiff` chunks for `Edit`/`Write` tool results** (CR-01 closure) | VERIFIED | Adapter now records `(name, input)` from each `ToolUseBlock` at emit time into a per-`stream()` local `_pending_tool_calls: dict[str, tuple[str, dict]]` (init line 324, store line 369), and recovers them via `_pending_tool_calls.pop(tool_use_id, ("", {}))` (line 397) on the matching `ToolResultBlock`. The real `claude_agent_sdk==0.1.81 ToolResultBlock` carries only `tool_use_id`, `content`, `is_error` (verified this run via `dataclasses.fields(ToolResultBlock)`), but the adapter no longer reads `tool_name` / `input` off it — the FileDiff branch is now reachable in production. **Closed by Plan 02-05 (commit `2e79161`).** `FakeToolResultBlock` reduced to the three real-SDK fields so the masking layer is gone. New regression `test_filediff_emitted_against_real_sdk_shape` constructs `FakeToolResultBlock` with only `tool_use_id`, `content`, `is_error` and asserts FileDiff fires — passes this run. |
+| 22 | **Computer-use cost-tracking arithmetic — `record_iteration_usage` overrides the running estimate** (CR-02 closure) | VERIFIED | `apps/api/backends/computer_use/cost.py` lines 122-123 now use `self._tokens_in = int(input_tokens)` and `self._tokens_out = int(output_tokens)` (override). Cache counters at lines 124-125 still use `+=` (visibility-only running totals) per the documented contract. Live verified this run via the VERIFICATION.md CR-02 reproduction recipe: `tracker.record_output_text('x'*40)` then `tracker.record_iteration_usage(input_tokens=10, output_tokens=5)` yields `tokens_in()=10`, `tokens_out()=5` (was 0/15 with the pre-fix `+=` bug). **Closed by Plan 02-06 (commit `a95617a`).** New regression `test_record_iteration_usage_overrides_running_estimate` passes this run. |
 
-**Score:** 18/22 truths verified
+**Score:** 22/22 truths verified
 
 ### Required Artifacts
 
 | Artifact | Expected | Status | Details |
 |----------|----------|--------|---------|
-| `apps/__init__.py` | Top-level package marker | VERIFIED | Exists. |
-| `apps/api/__init__.py` | `load_dotenv()` + `install_redaction_filter()` at import; PROJECT_ROOT via pathlib.parents[2] | VERIFIED | Lines 49, 55, 59 — all present. |
-| `apps/api/backends/protocol.py` | `BackendAdapter` Protocol, `Message`, `AdapterOptions`, `Backend` literal | VERIFIED | All four symbols defined; `Backend = Literal["openrouter", "claude_code", "computer_use"]` mirrors Phase 1. |
-| `apps/api/backends/chunks.py` | 7-variant ChatChunk union + `chat_chunk_adapter` | VERIFIED | All 7 variants + `Field(discriminator="type")` + `TypeAdapter(ChatChunk)` present. |
-| `apps/api/backends/keystore.py` | `KeyStore` with `use_keyring`, env fallback, lazy keyring import | VERIFIED | `SERVICE_NAME = "prompt-optimizer"`; `_ENV_MAP` covers `openrouter`/`anthropic`; `_HAS_KEYRING` lazy try/except. |
-| `apps/api/backends/logging_filter.py` | `SECRET_PATTERNS` + `RedactionFilter` + `install_redaction_filter()` + record-factory hook | VERIFIED (functionally) — see Truth 20 for ordering defect | All three symbols present; record factory + filter on root both installed idempotently. |
-| `apps/api/backends/pricing.py` | `PricingTable` with `from_static`, `get`, async `refresh_from_openrouter`, `_merge_openrouter_snapshot` (per-Mtok conversion) | VERIFIED | All four methods present. Pitfall-6 per-token → per-Mtok ×1_000_000 conversion at line 134-135. 12 unit tests pass. |
-| `apps/api/backends/cost.py` | `CostTracker` base + `DEFAULT_PER_TURN_COST_USD: Final[float] = 0.50` | VERIFIED | Both declared (lines 42, 45-94). |
-| `apps/api/backends/openrouter/adapter.py` | OpenRouterAdapter class | VERIFIED | All required elements: AsyncOpenAI, HTTP_REFERER/X_TITLE constants, `stream_options.include_usage`, tool-call delta accumulation, cancel/finally, cost cap. 360 lines. |
-| `apps/api/backends/openrouter/cost.py` | OpenRouterCostTracker with tiktoken + `record_final_usage` | VERIFIED | Class subclasses CostTracker; uses tiktoken gpt-4 encoder; `record_input_estimate`/`record_output_delta`/`record_final_usage` all present. |
-| `apps/api/backends/openrouter/errors.py` | PROVIDER_ERROR_MAP + `map_provider_error` (4 openai classes) | VERIFIED (but unused — see WR-03 advisory) | All 4 classes mapped; canonical-class-name fallback for D-18 sys.modules purge. NB: adapter inlines its own mapping; the `errors.py` module is exercised by tests but never imported by `adapter.py`. |
-| `apps/api/backends/claude_code/adapter.py` | ClaudeCodeAdapter — ClaudeSDKClient + ALLOWED_TOOLS lock + workspace + step cap + cancel | VERIFIED (with CR-01 defect in FileDiff branch — see Truth 21) | All structural elements present, but the FileDiff branch uses non-existent fields on the real SDK. |
-| `apps/api/backends/claude_code/__init__.py` | `os.environ.setdefault("CLAUDE_ENABLE_STREAM_WATCHDOG", "1")` + re-export | VERIFIED | Watchdog env var set via setdefault on import; smoke test confirms behavior. |
-| `apps/api/backends/claude_code/workspace.py` | `ephemeral_workspace` async context manager | VERIFIED (but unused by adapter — WR-08 advisory) | Module exists and is tested by `test_workspace.py`. Adapter inlines the same mkdtemp/rmtree logic instead of using it (intentional deviation per Plan 02-02 Decision #3). |
-| `apps/api/backends/claude_code/step_counter.py` | DEFAULT_STEP_CAP=25 + StepCounter | VERIFIED | Cap value 25 confirmed. |
-| `apps/api/backends/computer_use/adapter.py` | ComputerUseAdapter — opt-in gate, beta header, tool spec, agent loop, Screenshot, cancel | VERIFIED | All structural elements present; SECURE-05 opt-in is at top of `__init__` BEFORE api_key check (verified live). |
-| `apps/api/backends/computer_use/screen.py` | PlaywrightScreen with headless=True default + start/screenshot/click/type/press/scroll/goto/aclose | VERIFIED (with WR-09 URL scheme issue — advisory) | All methods present; `headless=True` default locked. |
-| `apps/api/backends/computer_use/step_counter.py` | DEFAULT_STEP_CAP=15 + StepCounter (sibling to claude_code/) | VERIFIED | Cap value 15 confirmed. |
-| `apps/api/backends/computer_use/cost.py` | ComputerUseCostTracker — record_output_text + record_iteration_usage | VERIFIED (with CR-02 arithmetic bug — see Truth 22) | Both methods present; arithmetic uses `+=` instead of `=`. |
-| `apps/api/backends/tests/test_adapter_contract.py` | D-19 6-invariant × 3-adapter parametric suite | VERIFIED | Collects 18 cases; 17 pass + 1 intentional skip (`step_cap_aborts[openrouter]`). Lazy `try/except ImportError → pytest.skip` pattern in conftest. |
-| `config/pricing.json` | 13 model rows + `_default` per D-17 | VERIFIED | 14 entries; all required keys present (`openai/gpt-5`, `anthropic/claude-opus-4-7`, etc.) plus `_default = {input_per_mtok: 5.00, output_per_mtok: 20.00}`. |
-| `.pre-commit-config.yaml` | Two LOCAL hooks: no-secrets + no-deprecated-claude-code-sdk | VERIFIED | Both hooks declared; `pass_filenames: false`, `language: script`, `stages: [pre-commit]`. |
-| `scripts/no-secrets.sh` | Executable; 3 patterns matching SECRET_PATTERNS | VERIFIED (executable) / FAILED (drift — see Truth 19) | Executable bit set; pattern set drifts from `logging_filter.SECRET_PATTERNS`. |
-| `scripts/no-deprecated-sdk.sh` | Executable; staged-content + uv.lock check for claude-code-sdk | VERIFIED | Executable; two-step grep pipeline (Rule-1 fix); blocks staged `import claude_code_sdk` and `uv.lock` re-entry. |
-| `.github/workflows/ci.yml` | Adds: `uv sync --extra keyring`, `pre-commit run --all-files`, OSS-06 import smoke, OSS-06 absence assertions, `pytest -m 'not live' apps/api/backends` + retains `pytest src/` | VERIFIED | All 6 new steps inserted; both YAML files parse. Phase 1 advisory `Routing canary eval` step preserved with `continue-on-error: true`. |
-| `.github/workflows/live-smoke.yml` | manual `workflow_dispatch` + weekly cron + `secrets.OPENROUTER_API_KEY` gate + `continue-on-error: true` | VERIFIED | All elements present; runs `pytest -m live apps/api/backends/openrouter -x --maxfail=1`. |
+| `apps/__init__.py` | Top-level package marker | VERIFIED (carry-forward) | Exists. |
+| `apps/api/__init__.py` | `load_dotenv()` + `install_redaction_filter()` at import; PROJECT_ROOT via pathlib.parents[2] | VERIFIED (carry-forward) | All present. |
+| `apps/api/backends/protocol.py` | `BackendAdapter` Protocol, `Message`, `AdapterOptions`, `Backend` literal | VERIFIED (carry-forward) | All four symbols defined. |
+| `apps/api/backends/chunks.py` | 7-variant ChatChunk union + `chat_chunk_adapter` | VERIFIED (carry-forward) | All 7 variants + `Field(discriminator="type")` + `TypeAdapter(ChatChunk)` present. |
+| `apps/api/backends/keystore.py` | `KeyStore` with `use_keyring`, env fallback, lazy keyring import | VERIFIED (carry-forward) | All structural elements present. |
+| `apps/api/backends/logging_filter.py` | `SECRET_PATTERNS` + `RedactionFilter` + `install_redaction_filter()` + record-factory hook; **Bearer FIRST in ordering (CR-05)** | VERIFIED (re-verified) | All three symbols present and idempotent installs intact. **CR-05 reorder confirmed live this run** — `SECRET_PATTERNS[0][0].pattern` starts with `Bearer\\s+`. |
+| `apps/api/backends/pricing.py` | `PricingTable` with `from_static`, `get`, async `refresh_from_openrouter`, `_merge_openrouter_snapshot` | VERIFIED (carry-forward) | All four methods present; Pitfall-6 per-token → per-Mtok conversion. |
+| `apps/api/backends/cost.py` | `CostTracker` base + `DEFAULT_PER_TURN_COST_USD: Final[float] = 0.50` | VERIFIED (carry-forward) | Both declared; smoke read returns `0.5` this run. |
+| `apps/api/backends/openrouter/adapter.py` | OpenRouterAdapter class | VERIFIED (carry-forward) | All structural elements present. |
+| `apps/api/backends/openrouter/cost.py` | OpenRouterCostTracker with tiktoken + `record_final_usage` | VERIFIED (carry-forward) | Class subclasses CostTracker; override semantics correct (parallel reference for CR-02). |
+| `apps/api/backends/openrouter/errors.py` | PROVIDER_ERROR_MAP + `map_provider_error` (4 openai classes) | VERIFIED (carry-forward; WR-03 advisory unchanged — `errors.py` not imported by adapter.py, still a maintenance trap but not a phase blocker) | All 4 classes mapped. |
+| `apps/api/backends/claude_code/adapter.py` | ClaudeCodeAdapter — ClaudeSDKClient + ALLOWED_TOOLS lock + workspace + step cap + cancel; **FileDiff branch reachable in production (CR-01)** | VERIFIED (re-verified) | All structural elements present. **CR-01 closure** introduces `_pending_tool_calls: dict[str, tuple[str, dict]]` (line 324 init, line 369 store, line 397 pop) so FileDiff fires from real SDK events. Verified live: `grep -c "_pending_tool_calls" adapter.py` = 5 occurrences. |
+| `apps/api/backends/claude_code/__init__.py` | `os.environ.setdefault("CLAUDE_ENABLE_STREAM_WATCHDOG", "1")` + re-export | VERIFIED (carry-forward) | Watchdog env var set via setdefault on import; live smoke confirmed `'1'` this run. |
+| `apps/api/backends/claude_code/workspace.py` | `ephemeral_workspace` async context manager | VERIFIED (carry-forward; WR-08 advisory unchanged — adapter inlines mkdtemp/rmtree instead) | Module exists and is tested. |
+| `apps/api/backends/claude_code/step_counter.py` | DEFAULT_STEP_CAP=25 + StepCounter | VERIFIED (carry-forward; live smoke confirms `25` this run) | Cap value confirmed. |
+| `apps/api/backends/claude_code/tests/fakes.py` | `FakeToolResultBlock` with three fields only (`tool_use_id`, `content`, `is_error`) — matches real SDK | VERIFIED (re-verified) | **CR-01 closure** drops `tool_name` / `input` fields. Verified live: `grep -E "^[[:space:]]+tool_name:[[:space:]]*str" fakes.py` returns 0 matches. |
+| `apps/api/backends/computer_use/adapter.py` | ComputerUseAdapter — opt-in gate, beta header, tool spec, agent loop, Screenshot, cancel | VERIFIED (carry-forward) | All structural elements present; SECURE-05 opt-in at top of `__init__`. |
+| `apps/api/backends/computer_use/screen.py` | PlaywrightScreen with headless=True default + start/screenshot/click/type/press/scroll/goto/aclose | VERIFIED (carry-forward; WR-09 URL scheme issue still advisory — not a phase blocker) | All methods present. |
+| `apps/api/backends/computer_use/step_counter.py` | DEFAULT_STEP_CAP=15 + StepCounter | VERIFIED (carry-forward; live smoke confirms `15` this run) | Cap value confirmed. |
+| `apps/api/backends/computer_use/cost.py` | ComputerUseCostTracker — `record_output_text` + `record_iteration_usage` with **override (=) semantics (CR-02)** | VERIFIED (re-verified) | **CR-02 closure** flips lines 122-123 from `+=` to `=`. Verified live: `grep -n "self._tokens_in = int" cost.py` returns line 122; `grep -n "self._tokens_in += int" cost.py` returns 0 matches. Cache counters at lines 124-125 still `+=` (preserved per contract). |
+| `apps/api/backends/tests/test_adapter_contract.py` | D-19 6-invariant × 3-adapter parametric suite | VERIFIED (re-verified) | 17 passed + 1 intentional N/A skip (`step_cap_aborts[openrouter]`). Verified live this run. |
+| `config/pricing.json` | 13 model rows + `_default` per D-17 | VERIFIED (carry-forward) | 14 entries present. |
+| `.pre-commit-config.yaml` | Two LOCAL hooks: no-secrets + no-deprecated-claude-code-sdk | VERIFIED (carry-forward) | Both hooks declared; clean-tree run exits 0 this run. |
+| `scripts/no-secrets.sh` | Executable; **regex set matches `SECRET_PATTERNS` alphabets exactly (CR-04)** | VERIFIED (re-verified) | **CR-04 closure** lines 22 + comment block 6-8 record the unified regex set. Live verified: grep for `sk-[A-Za-z0-9_-]{20,}` and `Bearer[[:space:]]+` returns both matches. |
+| `scripts/no-deprecated-sdk.sh` | Executable; staged-content + uv.lock check for claude-code-sdk | VERIFIED (carry-forward) | Executable; two-step grep pipeline (Rule-1 fix); blocks staged `import claude_code_sdk` and `uv.lock` re-entry. |
+| `.github/workflows/ci.yml` | Adds: `uv sync --extra keyring`, `pre-commit run --all-files`, **`Regex parity check (CR-04)`**, OSS-06 import smoke, OSS-06 absence assertions, `pytest -m 'not live' apps/api/backends` + retains `pytest src/` | VERIFIED (re-verified) | **CR-04 closure** inserts a dedicated step at line 34: `Regex parity check (SECURE-01 + SECURE-02 contract)` that runs only `test_logging_filter_and_no_secrets_regex_parity`. YAML still parses; live verified this run. |
+| `.github/workflows/live-smoke.yml` | manual `workflow_dispatch` + weekly cron + `secrets.OPENROUTER_API_KEY` gate + `continue-on-error: true` | VERIFIED (carry-forward) | All elements present. |
 
 ### Key Link Verification
 
 | From | To | Via | Status | Details |
 |------|----|-----|--------|---------|
-| `apps/api/__init__.py` | `install_redaction_filter` | module-level call at import | VERIFIED | Line 59 — `install_redaction_filter()` runs unconditionally on import. |
-| `apps/api/__init__.py` | `dotenv.load_dotenv` | module-level call at import | VERIFIED | Line 55 — `load_dotenv()` runs unconditionally on import. |
-| `apps/api/backends/keystore.py` | `keyring` | lazy try/except optional import | VERIFIED | Lines 52-57 — try/except sets `_HAS_KEYRING` flag. |
-| `apps/api/backends/pricing.py` | `httpx.AsyncClient` | async refresh from openrouter.ai/api/v1/models | VERIFIED | Line 112 — `httpx.AsyncClient(timeout=10.0)`. |
-| `openrouter/adapter.py` | `openai.AsyncOpenAI` | `_default_client_factory` constructor injects `default_headers` | VERIFIED | Lines 163-179. |
-| `openrouter/adapter.py` | `apps.api.backends.chunks` (TextDelta/ToolCall/StreamError/Done) | module import + yield | VERIFIED | `from apps.api.backends.chunks import (...)` + 8 yield sites in `stream`. |
-| `openrouter/__main__.py` | `OpenRouterAdapter` | instantiate + iterate stream | VERIFIED | CLI exists; `--help` runs successfully. |
-| `claude_code/__init__.py` | `os.environ['CLAUDE_ENABLE_STREAM_WATCHDOG']` | `setdefault` at module import | VERIFIED | Confirmed live (`'1'` after import). |
-| `claude_code/adapter.py` | `claude_agent_sdk.ClaudeSDKClient` | module import + connect/query/receive_response/interrupt/disconnect | VERIFIED | Lines 72-85 + lifecycle calls at 313-319, 405, 441, 486. |
-| `claude_code/adapter.py` | `chunks.FileDiff` | yield | **NOT_WIRED IN PRODUCTION** | Module imports `FileDiff` but the dispatch branch at adapter.py:366-378 is unreachable against the real SDK (CR-01) — see Truth 21. |
-| `computer_use/adapter.py` | `os.environ['COMPUTER_USE_OPT_IN']` | constructor check BEFORE provider client | VERIFIED | Lines 217-223 — opt-in raise is the FIRST statement in `__init__`. |
-| `computer_use/adapter.py` | `anthropic.AsyncAnthropic` | `client_factory` default | VERIFIED | Line 238-239. |
-| `computer_use/adapter.py` | `anthropic client.beta.messages.stream` | `async with` agent loop | VERIFIED | Line 333. |
-| `computer_use/screen.py` | `playwright.async_api.async_playwright` | `PlaywrightScreen.start` | VERIFIED | Line 93. |
-| `.pre-commit-config.yaml` | `scripts/no-secrets.sh` | `entry` | VERIFIED | Line 8. |
-| `.pre-commit-config.yaml` | `scripts/no-deprecated-sdk.sh` | `entry` | VERIFIED | Line 14. |
-| `.github/workflows/ci.yml` | `pre-commit run --all-files` | step | VERIFIED | Line 32. |
-| `.github/workflows/ci.yml` | claude_agent_sdk import smoke | step | VERIFIED | Line 35. |
+| `apps/api/__init__.py` | `install_redaction_filter` | module-level call at import | VERIFIED (carry-forward) | Line 59 — runs unconditionally on import. |
+| `apps/api/__init__.py` | `dotenv.load_dotenv` | module-level call at import | VERIFIED (carry-forward) | Line 55 — runs unconditionally on import. |
+| `apps/api/backends/keystore.py` | `keyring` | lazy try/except optional import | VERIFIED (carry-forward) | `_HAS_KEYRING` flag pattern. |
+| `apps/api/backends/pricing.py` | `httpx.AsyncClient` | async refresh from openrouter.ai/api/v1/models | VERIFIED (carry-forward) | `httpx.AsyncClient(timeout=10.0)`. |
+| `openrouter/adapter.py` | `openai.AsyncOpenAI` | `_default_client_factory` constructor injects `default_headers` | VERIFIED (carry-forward) | Headers wired via constructor (D-12). |
+| `openrouter/adapter.py` | `apps.api.backends.chunks` (TextDelta/ToolCall/StreamError/Done) | module import + yield | VERIFIED (carry-forward) | 8 yield sites in `stream`. |
+| `openrouter/__main__.py` | `OpenRouterAdapter` | instantiate + iterate stream | VERIFIED (carry-forward) | `--help` runs this run. |
+| `claude_code/__init__.py` | `os.environ['CLAUDE_ENABLE_STREAM_WATCHDOG']` | `setdefault` at module import | VERIFIED (carry-forward) | `'1'` after import — confirmed live. |
+| `claude_code/adapter.py` | `claude_agent_sdk.ClaudeSDKClient` | module import + connect/query/receive_response/interrupt/disconnect | VERIFIED (carry-forward) | Lifecycle calls at 328-334, 438, 474, 519. |
+| **`claude_code/adapter.py` ToolUseBlock emit site** | **`_pending_tool_calls` dict keyed by `tool_use_id`** | **store `(tool_name, input)` at emit** | **VERIFIED (CR-01 closure)** | Line 367-372: `if tool_id: _pending_tool_calls[tool_id] = (getattr(block, "name", ""), getattr(block, "input", {}) or {})`. |
+| **`claude_code/adapter.py` ToolResultBlock dispatch** | **`chunks.FileDiff` emission** | **lookup `tool_name` + `input` from `_pending_tool_calls.pop(tool_use_id)`** | **VERIFIED (CR-01 closure — was NOT_WIRED IN PRODUCTION)** | Line 397-411: `tool_name, tool_input = _pending_tool_calls.pop(tool_use_id, ("", {}))` then `if tool_name in ("Edit", "Write"): yield FileDiff(...)`. The branch is now reachable from real SDK events. |
+| `computer_use/adapter.py` | `os.environ['COMPUTER_USE_OPT_IN']` | constructor check BEFORE provider client | VERIFIED (carry-forward) | Opt-in raise is the FIRST statement in `__init__`. |
+| `computer_use/adapter.py` | `anthropic.AsyncAnthropic` | `client_factory` default | VERIFIED (carry-forward) | Default factory wired. |
+| `computer_use/adapter.py` | `anthropic client.beta.messages.stream` | `async with` agent loop | VERIFIED (carry-forward) | `betas=[BETA_HEADER]` plumbed. |
+| **`computer_use/cost.py:record_iteration_usage`** | **`self._tokens_in` / `self._tokens_out` (assigned with `=`, not `+=`)** | **override semantics** | **VERIFIED (CR-02 closure)** | Lines 122-123 use `=`. Cache counters at lines 124-125 keep `+=` (correct per documented contract). |
+| `computer_use/screen.py` | `playwright.async_api.async_playwright` | `PlaywrightScreen.start` | VERIFIED (carry-forward) | Playwright import + boot call wired. |
+| `.pre-commit-config.yaml` | `scripts/no-secrets.sh` | `entry` | VERIFIED (carry-forward) | Hook entry present. |
+| `.pre-commit-config.yaml` | `scripts/no-deprecated-sdk.sh` | `entry` | VERIFIED (carry-forward) | Hook entry present. |
+| **`apps/api/backends/logging_filter.py` SECRET_PATTERNS list** | **`scripts/no-secrets.sh` `grep -E` pattern** | **verbatim regex equivalence (modulo `\s+` ↔ `[[:space:]]+`)** | **VERIFIED (CR-04 closure)** | Plan 02-07 unified the alphabets. Programmatic parity check (`test_logging_filter_and_no_secrets_regex_parity`) reads the script and asserts each of the 3 sub-patterns appears in `SECRET_PATTERNS` after `[[:space:]]+` → `\s+` translation — passes this run. |
+| **`apps/api/backends/tests/test_logging_filter.py` parity test** | **`scripts/no-secrets.sh`** | **`Path(__file__).resolve().parents[4]` → read script file, split alternation, translate, compare against `SECRET_PATTERNS`** | **VERIFIED (CR-04 closure)** | Test now exists; runs as part of the dedicated CI `Regex parity check` step at line 34 of ci.yml AND as part of the broader `Phase 2 — apps/api/backends unit tests (no live)` step at line 56. Intentional duplication for one-line failure visibility. |
+| `.github/workflows/ci.yml` | `pre-commit run --all-files` | step | VERIFIED (carry-forward) | Line 32. |
+| `.github/workflows/ci.yml` | **`Regex parity check`** | dedicated step running `test_logging_filter_and_no_secrets_regex_parity` | **VERIFIED (CR-04 closure)** | Line 34 — new step inserted between pre-commit and OSS-06 import smoke. |
+| `.github/workflows/ci.yml` | claude_agent_sdk import smoke | step | VERIFIED (carry-forward) | Line 40-41. |
+
+### Data-Flow Trace (Level 4)
+
+This phase ships adapter machinery (no dynamic-rendering UI yet). Data-flow tracing focuses on the chunk-emission pipeline whose upstream sources (provider streams, SDK events) cannot be programmatically invoked without a paid API key — those routes are covered by the human-verification items below.
+
+| Artifact | Data Variable | Source | Produces Real Data | Status |
+|----------|---------------|--------|---------------------|--------|
+| `claude_code/adapter.py` FileDiff emission | `tool_name`, `tool_input` | `_pending_tool_calls.pop(tool_use_id, ("", {}))` populated from `getattr(block, "name", "")` / `getattr(block, "input", {})` on each ToolUseBlock | Yes — `ToolUseBlock` carries `id`, `name`, `input` on the real SDK (verified via dataclass-introspection on the installed `claude_agent_sdk==0.1.81`). The fix maps that authoritative source into the FileDiff branch. | FLOWING (CR-01 closure) |
+| `computer_use/cost.py` `Done.tokens_in/out` | `self._tokens_in`, `self._tokens_out` | `record_iteration_usage(input_tokens=..., output_tokens=...)` from `stream.get_final_message().usage` (Anthropic authoritative numbers) | Yes — override semantics replaces the running char/4 estimate with the provider-authoritative count on each iteration. Verified live: 0+10 estimate → override to (10, 5). | FLOWING (CR-02 closure) |
+| `logging_filter.py` redacted log records | `record.msg`, `record.args` | `_redact_text(msg)` running every `SECRET_PATTERN` substitution in order (Bearer FIRST, then sk-ant-, then sk-) | Yes — verified live for all five canonical inputs including the previously-failing `Authorization: Bearer sk-ant-…` and `key: sk-AAAAA_AAAAAAAAAAAAAAAAAA` reproductions. | FLOWING (CR-04 + CR-05 closure) |
+| `scripts/no-secrets.sh` staged-secret detection | `git diff --cached` lines | `grep -E '(sk-ant-[A-Za-z0-9_-]{8,}|sk-[A-Za-z0-9_-]{20,}|Bearer[[:space:]]+[A-Za-z0-9_.-]{20,})'` | Yes — unified alphabets now catch the two previously-bypassed reproductions (underscore-bearing OpenAI key + tab-separated Bearer header) per Plan 02-07 SUMMARY. End-to-end `git commit` flow is part of the human-verification list. | FLOWING (CR-04 closure) |
 
 ### Behavioral Spot-Checks
 
 | Behavior | Command | Result | Status |
 |----------|---------|--------|--------|
-| Full Phase 2 test suite passes | `uv run pytest -m 'not live' apps/api/backends` | `129 passed, 1 skipped, 3 deselected in 1.05s` | PASS |
-| D-19 contract suite passes for all 3 adapters | `uv run pytest -m 'not live' apps/api/backends/tests/test_adapter_contract.py` | `17 passed, 1 skipped in 0.83s` | PASS |
-| Phase 1 D-18 import-graph guard stays green | `uv run pytest src/routing/tests/test_decide_smoke.py -x -q` | 7 passed | PASS |
-| Per-adapter CLI `--help` runs | `python -m apps.api.backends.{openrouter,claude_code,computer_use} --help` | All 3 print usage with --prompt/--model/--max-cost-usd/--max-steps (claude_code also --cwd) | PASS |
+| Full Phase 2 + Phase 1 non-live suite passes | `uv run pytest -m 'not live'` | `233 passed, 2 skipped, 3 deselected in 79.39s` | PASS |
+| Four CR regression tests pass in isolation | `uv run pytest -m 'not live' apps/api/backends/claude_code/tests/test_adapter.py::test_filediff_emitted_against_real_sdk_shape apps/api/backends/computer_use/tests/test_adapter.py::test_record_iteration_usage_overrides_running_estimate apps/api/backends/tests/test_logging_filter.py::test_bearer_prefixed_sk_ant_redacts_as_bearer_unit apps/api/backends/tests/test_logging_filter.py::test_logging_filter_and_no_secrets_regex_parity -v` | `4 passed in 0.02s` | PASS |
+| D-19 contract suite passes for all 3 adapters | `uv run pytest -m 'not live' apps/api/backends/tests/test_adapter_contract.py -v` | `17 passed, 1 skipped in 0.85s` | PASS |
+| Phase 1 D-18 import-graph guard stays green | `uv run pytest -m 'not live' src/routing/tests/test_decide_smoke.py -x -q` | `7 passed` | PASS |
+| Per-adapter CLI `--help` runs | `uv run python -m apps.api.backends.{openrouter,claude_code,computer_use} --help` | All 3 print usage with `--prompt`/`--model`/`--max-cost-usd`/`--max-steps` (claude_code also `--cwd`) | PASS |
 | Pre-commit clean tree | `uv run pre-commit run --all-files` | `Block secrets...Passed` / `Block deprecated...Passed` | PASS |
-| OSS-06 import smoke | `uv run python -c "from claude_agent_sdk import ClaudeAgentOptions; print('OK')"` | `OK` | PASS |
-| OSS-06 lockfile absence | `grep -c '"claude-code-sdk"' uv.lock` | `0` | PASS |
+| OSS-06 lockfile absence | `grep -q '"claude-code-sdk"' uv.lock` | exit 1 (absent) | PASS |
 | BACKEND-09 watchdog env var on import | `import apps.api.backends.claude_code; os.environ['CLAUDE_ENABLE_STREAM_WATCHDOG']` | `'1'` | PASS |
-| SECURE-05 opt-in regression | `unset COMPUTER_USE_OPT_IN; ComputerUseAdapter(api_key='fake')` | RuntimeError with `COMPUTER_USE_OPT_IN` text | PASS |
-| YAML workflow validity | `python -c "import yaml; yaml.safe_load(open('.github/workflows/{ci,live-smoke}.yml'))"` | YAML OK | PASS |
-| TypeAdapter round-trip (BACKEND-01) | `chat_chunk_adapter.validate_python({"type":"text_delta","text":"hi"})` | Returns `TextDelta(text="hi")` | PASS |
-| Logger redaction on common patterns | `logging.info('auth: sk-ant-A...'); logging.info('open: sk-A...'); logging.info('bearer: Bearer A...')` | All three rewritten to `***REDACTED-…***` | PASS |
-| **Logger redaction on Bearer-prefixed sk-ant- (CR-05)** | `logging.info('Authorization: Bearer sk-ant-api03-XYZ1234567890ABCDEFGHIJKL')` | Mis-redacts to `Bearer ***REDACTED-ANTHROPIC***` — leaves literal `Bearer ` exposed | FAIL — see Truth 20 |
-| **Pre-commit / filter regex parity (CR-04)** | Compare `sk-[A-Za-z0-9]{20,}` (hook) vs `sk-[A-Za-z0-9_-]{20,}` (filter) on `sk-AAAAA_AAAAAAAAAAAAAAAAAA` | Filter matches (redact); hook MISSES (no block) | FAIL — see Truth 19 |
-| **ToolResultBlock fields against real SDK (CR-01)** | `dataclasses.fields(ToolResultBlock)` from `claude_agent_sdk==0.1.81` | `['tool_use_id', 'content', 'is_error']` — `tool_name` and `input` ABSENT | FAIL — see Truth 21 |
-| **ComputerUseCostTracker override semantics (CR-02)** | `record_output_text('x'*40)` then `record_iteration_usage(input_tokens=10, output_tokens=5)`; check `tokens_out()` | Returns `15`, expected `5` per docstring | FAIL — see Truth 22 |
+| **Logger redaction on `Bearer sk-ant-…` (CR-05 closure)** | `_redact_text('Authorization: Bearer sk-ant-api03-XYZ1234567890ABCDEFGHIJKL')` | `'Authorization: Bearer ***REDACTED***'` (NOT `'Bearer ***REDACTED-ANTHROPIC***'`) | PASS (was FAIL) |
+| **Pre-commit / filter regex parity (CR-04 closure)** | `_redact_text('key: sk-AAAAA_AAAAAAAAAAAAAAAAAA')` redacts AND `grep -E '(...sk-[A-Za-z0-9_-]{20,}...)' scripts/no-secrets.sh` returns a match line | Filter rewrites to `'key: ***REDACTED-OPENAI***'`; script grep line returned | PASS (was FAIL) |
+| **ToolResultBlock fields against real SDK (CR-01 closure)** | `dataclasses.fields(ToolResultBlock)` from `claude_agent_sdk==0.1.81` AND adapter no longer reads `tool_name` / `input` off that block | Fields: `['tool_use_id', 'content', 'is_error']`; adapter source line 397 reads from `_pending_tool_calls.pop(tool_use_id, ("", {}))` instead | PASS (was FAIL) |
+| **ComputerUseCostTracker override semantics (CR-02 closure)** | `record_output_text('x'*40)` then `record_iteration_usage(input_tokens=10, output_tokens=5)`; check `tokens_in() / tokens_out()` | Returns `10, 5` (override). Pre-fix produced `0, 15` (accumulate). | PASS (was FAIL) |
+| TypeAdapter round-trip (BACKEND-01) | `chat_chunk_adapter.validate_python({"type":"text_delta","text":"hi"})` | Returns `TextDelta(text='hi')` | PASS |
+| SECRET_PATTERNS Bearer-first ordering | `SECRET_PATTERNS[0][0].pattern` | `Bearer\\s+[A-Za-z0-9_.\\-]{20,}` | PASS |
+
+### Probe Execution
+
+This phase does not declare or imply probe-based verification (no `scripts/*/tests/probe-*.sh` paths referenced in PLAN, SUMMARY, or success criteria — the project uses pytest contract tests via D-19 instead). Probe execution: SKIPPED — phase verification contract is satisfied by the D-19 contract suite + targeted regression tests, both green.
 
 ### Requirements Coverage
 
+All Phase 2 requirement IDs declared in plan frontmatter (BACKEND-01..09, SECURE-01, SECURE-02, SECURE-04, SECURE-05, OSS-06) are accounted for. The prior verification's gap analysis flagged BACKEND-04 as BLOCKED (CR-01) and SECURE-01 / SECURE-02 as partial (CR-04/CR-05) — all three are now SATISFIED after the gap-closure plans landed.
+
 | Requirement | Source Plan | Description | Status | Evidence |
 |-------------|------------|-------------|--------|----------|
-| BACKEND-01 | 02-00 | `ChatChunk` discriminated union (7 variants) is the single contract | SATISFIED | `chunks.py` ships all 7 variants + `chat_chunk_adapter`. REQUIREMENTS.md was reconciled in Plan 02-04 to include `ToolResult`. |
-| BACKEND-02 | 02-00 | Common `BackendAdapter` Protocol with `async def stream(...)` | SATISFIED | `protocol.py:72-86`. All three adapters structurally implement it; D-19 parametric suite enforces. |
-| BACKEND-03 | 02-01 | OpenRouter adapter via OpenAI SDK pointed at `https://openrouter.ai/api/v1` + HTTP-Referer/X-Title attribution | SATISFIED | `openrouter/adapter.py:78-80, 163-179, 217`. Header recording + `stream_options.include_usage` regressions pass. |
-| BACKEND-04 | 02-02 | Claude Code adapter via `claude-agent-sdk 0.1.80+`; streams tool calls + **file diffs** + final summary | **BLOCKED** | `tool calls` and `final summary` ship. `file diffs` cannot be emitted in production — see Truth 21 / CR-01. |
-| BACKEND-05 | 02-03 | Computer-use adapter via `anthropic 0.40+` with `computer_20251124` tool + `computer-use-2025-11-24` beta header | SATISFIED | `computer_use/adapter.py:115, 277-285, 333-338`. T2 unit test asserts tool spec + beta header recorded. |
-| BACKEND-06 | 02-01/02/03 | Per-turn USD cap (default $0.50) + per-iteration step cap (25 / 15) | SATISFIED | `DEFAULT_PER_TURN_COST_USD = 0.50` + `DEFAULT_STEP_CAP` (25 / 15) constants. D-19 cost-cap + step-cap PASS for 3+2 adapter parameterisations. NB: CR-02 inflates the computer-use cap arithmetic but does not eliminate the cap behavior. |
-| BACKEND-07 | 02-01/02/03 | Mid-stream cancellation propagates within 2 s | SATISFIED | D-19 `test_cancellation_within_2_seconds[*]` all 3 PASS with `@pytest.mark.timeout(2)`. Each adapter has `except asyncio.CancelledError → terminal pair → raise`. |
-| BACKEND-08 | 02-02 | Claude Code per-thread ephemeral workspace by default; opt-in `cwd` flag | SATISFIED | `claude_code/adapter.py:286-291` — tempfile.mkdtemp(prefix="pomu-cc-") default; `options.cwd` opt-in honored. ROADMAP B1 annotation present. |
-| BACKEND-09 | 02-02 | `CLAUDE_ENABLE_STREAM_WATCHDOG=1` set at module import | SATISFIED | `claude_code/__init__.py` calls `os.environ.setdefault("CLAUDE_ENABLE_STREAM_WATCHDOG", "1")`. Smoke test confirms `'1'` after import. |
-| SECURE-01 | 02-00 | Logger redaction filter strips `sk-…`, `sk-ant-…`, `Bearer …` before any handler sees the record | NEEDS HUMAN ATTENTION | Filter works for the three documented patterns (PASS) but CR-05 (Bearer-prefixed sk-ant-) mis-redacts. Truth 20 calls out the gap; SECURE-01 wording does not specifically require Bearer-prefixed sk-ant- handling, so this is borderline — flagging as advisory follow-up that downstream pattern-matchers may break. |
-| SECURE-02 | 02-04 | Pre-commit hook greps staged content for `sk-` and `sk-ant-` prefixes and blocks | SATISFIED (partial — see CR-04) | Pre-commit blocks `sk-`/`sk-ant-`/`Bearer ` literals. Truth 19 calls out drift with the filter regex set; the hook still satisfies SECURE-02's literal wording but the contract docstring claim of "identical regex set" is violated. |
-| SECURE-04 | 02-00 | BYOK keys live only in process memory + optional `keyring`; never on disk | SATISFIED | `KeyStore` does not persist to SQLite/JSON/log files; `keyring` is opt-in via constructor flag + optional extra. 8 unit tests pass. |
-| SECURE-05 | 02-03 | Computer-use is OFF by default; `COMPUTER_USE_OPT_IN=1` required | SATISFIED | Constructor raise fires BEFORE api_key check AND BEFORE any provider client construction. 4 unit tests + live smoke confirm. |
-| OSS-06 | 02-04 | CI smoke test asserts `from claude_agent_sdk import ClaudeAgentOptions` to catch regression to deprecated `claude-code-sdk` | SATISFIED | Pre-commit hook + CI import smoke + CI uv.lock grep + pyproject.toml pin = quadruple enforcement. All four verified live. |
+| BACKEND-01 | 02-00 | `ChatChunk` discriminated union (7 variants) is the single contract | SATISFIED | `chunks.py` ships all 7 variants + `chat_chunk_adapter`; REQUIREMENTS.md reconciled to include `ToolResult`. Truth 13. |
+| BACKEND-02 | 02-00, 02-05 | Common `BackendAdapter` Protocol with `async def stream(...)` | SATISFIED | `protocol.py:72-86`; all three adapters structurally implement it; D-19 parametric suite enforces. Truth 14. Plan 02-05 closure does not regress the Protocol shape. |
+| BACKEND-03 | 02-01 | OpenRouter adapter via OpenAI SDK pointed at `https://openrouter.ai/api/v1` + HTTP-Referer/X-Title attribution | SATISFIED | Truth 8 + Truth 15. |
+| BACKEND-04 | 02-02, 02-05 | Claude Code adapter via `claude-agent-sdk 0.1.80+`; streams tool calls + **file diffs** + final summary | **SATISFIED** (was BLOCKED in prior report) | **Plan 02-05 closes CR-01 — FileDiff is now reachable from real SDK events.** Truths 16, 21. |
+| BACKEND-05 | 02-03 | Computer-use adapter via `anthropic 0.40+` with `computer_20251124` tool + `computer-use-2025-11-24` beta header | SATISFIED | Truth 17. |
+| BACKEND-06 | 02-01/02/03, 02-06 | Per-turn USD cap (default $0.50) + per-iteration step cap (25 / 15) | SATISFIED | Truths 2, 3, 18, 22. **Plan 02-06 closes CR-02 — cap arithmetic now correct on the authoritative provider numbers.** |
+| BACKEND-07 | 02-01/02/03 | Mid-stream cancellation propagates within 2 s | SATISFIED | Truth 4. |
+| BACKEND-08 | 02-02 | Claude Code per-thread ephemeral workspace by default; opt-in `cwd` flag | SATISFIED | Truth 11. |
+| BACKEND-09 | 02-02 | `CLAUDE_ENABLE_STREAM_WATCHDOG=1` set at module import | SATISFIED | Truth 9. |
+| SECURE-01 | 02-00, 02-07 | Logger redaction filter strips `sk-…`, `sk-ant-…`, `Bearer …` before any handler sees the record | **SATISFIED** (was NEEDS HUMAN ATTENTION in prior report) | **Plan 02-07 closes CR-05 — `Bearer sk-ant-…` now redacts as `Bearer ***REDACTED***`.** Truths 5, 20. Programmatic parity check + dedicated CI step prevent future drift. |
+| SECURE-02 | 02-04, 02-07 | Pre-commit hook greps staged content for `sk-` and `sk-ant-` prefixes and blocks | **SATISFIED** (was partial in prior report) | **Plan 02-07 closes CR-04 — script regex set now matches `SECRET_PATTERNS` alphabets exactly.** Truths 12, 19. End-to-end `git commit` flow verified by the human-verification item (Plan 02-07 SUMMARY records the bash-level reproductions). |
+| SECURE-04 | 02-00 | BYOK keys live only in process memory + optional `keyring`; never on disk | SATISFIED | Truth 6. |
+| SECURE-05 | 02-03 | Computer-use is OFF by default; `COMPUTER_USE_OPT_IN=1` required | SATISFIED | Truth 10. |
+| OSS-06 | 02-04 | CI smoke test asserts `from claude_agent_sdk import ClaudeAgentOptions` to catch regression to deprecated `claude-code-sdk` | SATISFIED | Truth 7. |
+
+**Orphaned requirements:** None. REQUIREMENTS.md Traceability table maps BACKEND-01..09, SECURE-01, SECURE-02, SECURE-04, SECURE-05, OSS-06 to Phase 2; every ID appears in at least one Phase 2 plan's `requirements` field.
 
 ### Anti-Patterns Found
 
+After the three gap-closure plans landed, the four previously-blocking defects (CR-01 / CR-02 / CR-04 / CR-05) are RESOLVED. Several Warning-level items remain — these were called out in the prior verification report as advisory follow-ups that do not invalidate any Phase 2 must-have truth and were intentionally left out of the gap-closure scope.
+
 | File | Line | Pattern | Severity | Impact |
 |------|------|---------|----------|--------|
-| `apps/api/backends/claude_code/adapter.py` | 362-372 | Field-access drift vs real SDK (`getattr(b, "tool_name", "")`) | Blocker (CR-01) | FileDiff is unreachable from real SDK events — invalidates BACKEND-04 truth #21. |
-| `apps/api/backends/computer_use/cost.py` | 114-115 | `+=` instead of `=` in a method whose docstring promises "Override" | Blocker (CR-02) | Token counts inflated; cap arithmetic inflated by char/4 estimates not displaced. |
-| `apps/api/backends/logging_filter.py` | 50-54 | Pattern ordering puts `sk-ant-` ahead of `Bearer\s+…` | Blocker (CR-05) | Canonical `Authorization: Bearer sk-ant-…` mis-redacts; downstream scrubbers will miss. |
-| `scripts/no-secrets.sh` vs `logging_filter.py` | n/a | Regex set drift between hook and runtime filter; docstring asserts they are identical | Blocker (CR-04) | Underscore-bearing OpenAI keys redact at runtime but commit through. Bearer-with-tab passes through commit. |
-| Multiple adapter files | per CR-03 | `StreamError.message=str(exc)` passes unredacted SDK exception text through SSE | Warning (CR-03 advisory) | Provider exception messages can echo URLs/keys; the RedactionFilter only covers log records, not ChatChunk payloads. NOT counted as a Phase 2 truth failure because SECURE-01 only specifies log redaction, but Phase 3 SSE will reveal this leak path. |
-| Multiple adapter files | per WR-02 | `options.max_cost_usd or self._max_cost` (and `or self._max_steps`) treat 0 as falsy | Warning | A caller setting max_cost_usd=0.0 for an explicit dry-run gets the default 0.50 instead. Use `is None`. |
-| Multiple adapter files | per WR-03 | `errors.py` modules tested but never imported by adapter.py | Warning | Maintenance trap; adapters could regress their error mapping without test coverage detecting it. |
-| `claude_code/adapter.py` | 286-291, 492-496 | Inline workspace lifecycle duplicates `workspace.py`'s `ephemeral_workspace` | Warning (WR-08) | Two divergent code paths for the same lifecycle. |
-| `computer_use/screen.py` | 181-185 | `goto(url)` accepts arbitrary URL schemes | Warning (WR-09) | `file:///`, `chrome://`, `data:` allowed once opted in — info-disclosure risk. |
-| `computer_use/adapter.py` | 647-650 | Unbounded `asyncio.sleep` in `wait` action | Warning (WR-01) | Model can pin the stream for hours; cancel-only termination. |
+| (no blocker-level anti-patterns remain in this phase's source) | — | — | — | The four prior Blockers (CR-01 / CR-02 / CR-04 / CR-05) are all closed by Plans 02-05/06/07. |
+| Multiple adapter files | per CR-03 | `StreamError.message=str(exc)` passes unredacted SDK exception text through SSE chunks | Warning (CR-03 advisory; carry-forward) | Provider exception messages may echo URLs/keys through the chunk payload (not the log record, which IS redacted). Phase 2 SECURE-01 wording mandates LOG redaction only — chunk-payload scrubbing is a Phase 3 concern (API-02 SSE / API-04 BYOK). Not counted as a Phase 2 truth failure. |
+| Multiple adapter files | per WR-02 | `options.max_cost_usd or self._max_cost` (and `or self._max_steps`) treat 0 as falsy | Warning (carry-forward) | A caller setting max_cost_usd=0.0 for an explicit dry-run gets the default 0.50 instead. Use `is None`. Confirmed still present at openrouter:197, claude_code:299-300, computer_use:262-263. Not a Phase 2 truth failure. |
+| Multiple adapter files | per WR-03 | `errors.py` modules tested but never imported by adapter.py | Warning (carry-forward) | Maintenance trap; adapters could regress their error mapping without test coverage detecting it. Not a Phase 2 truth failure. |
+| `claude_code/adapter.py` | inline workspace lifecycle | Inline workspace mkdtemp/rmtree duplicates `workspace.py`'s `ephemeral_workspace` | Warning (WR-08 carry-forward) | Two divergent code paths for the same lifecycle. Not a Phase 2 truth failure. |
+| `computer_use/screen.py` | `goto(url)` accepts arbitrary URL schemes | Warning (WR-09 carry-forward) | `file:///`, `chrome://`, `data:` allowed once opted in — info-disclosure risk. Not a Phase 2 truth failure. |
+| `computer_use/adapter.py` | Unbounded `asyncio.sleep` in `wait` action | Warning (WR-01 carry-forward) | Model can pin the stream for hours; cancel-only termination. Not a Phase 2 truth failure. |
 
-**Debt markers (`TBD`/`FIXME`/`XXX`/`TODO`/`HACK`/`PLACEHOLDER`):** None found in Phase 2 source files. The "placeholder" reference for `pomu-cc-` is in ROADMAP.md as a documented design note, not as code debt.
+**Debt markers (`TBD`/`FIXME`/`XXX`/`TODO`/`HACK`/`PLACEHOLDER`):** None in Phase 2 source files modified during gap closure (`adapter.py`, `cost.py`, `fakes.py`, `test_adapter.py`, `logging_filter.py`, `no-secrets.sh`, `test_logging_filter.py`, `ci.yml`). The "placeholder" reference for `pomu-cc-` is in ROADMAP.md as a documented design note, not as code debt.
 
 ### Human Verification Required
 
 These cannot be validated programmatically because they require BYOK credentials or external services. Frontmatter `human_verification:` enumerates the exact commands.
 
 1. **OpenRouter live smoke** — `OPENROUTER_API_KEY=… uv run pytest -m live apps/api/backends/openrouter/tests/test_live.py -x` proves BACKEND-03 / ROADMAP SC #1 against the real provider.
-2. **Claude Code live smoke** — `ANTHROPIC_API_KEY=… uv run pytest -m live apps/api/backends/claude_code/tests/test_live.py -x` should produce at least one FileDiff. **Predicted FAIL** until CR-01 (Truth 21) is fixed.
+2. **Claude Code live smoke** — `ANTHROPIC_API_KEY=… uv run pytest -m live apps/api/backends/claude_code/tests/test_live.py -x` should produce at least one FileDiff. **Plan 02-05 (CR-01 closure) makes this branch reachable in production for the first time** — no longer a predicted FAIL.
 3. **Computer-use live smoke** — `COMPUTER_USE_OPT_IN=1 ANTHROPIC_API_KEY=… uv run pytest -m live apps/api/backends/computer_use/tests/test_live.py -x` proves BACKEND-05 against real Anthropic + Chromium.
-4. **Pre-commit deliberate-paste live block** — stage a fake key and confirm `git commit` is blocked. Plan 02-04 SUMMARY documents this; recommend re-running after CR-04 fix.
+4. **Pre-commit deliberate-paste live block (refresh)** — stage three fake keys (`sk-ant-AAAAA…`, the CR-04 underscore-bearing OpenAI form, and the CR-04 tab-Bearer form) via `git add` and confirm `git commit` is blocked. Plan 02-07 SUMMARY records the bash-level reproductions after the fix; this human-verification item confirms the full hook still wires through to the actual git-staging hook interaction.
 
 ### Gaps Summary
 
-Phase 2 delivers the **architecture** of the goal: three async adapters share a single `ChatChunk` Pydantic discriminated union, implement a one-method `BackendAdapter` Protocol, enforce per-turn cost caps, per-iteration step caps, and 2-second cancellation via PEP 789. CI gates SECURE-02 + OSS-06 via pre-commit hooks and workflow checks. 129 unit tests pass, the D-19 shared contract suite is 17/18 green (1 intentional skip), and the Phase 1 D-18 import-graph guard remains green.
+The phase ships the architecture and the production-quality implementation intended by the goal: three async adapters share a single `ChatChunk` Pydantic discriminated union, implement a one-method `BackendAdapter` Protocol, enforce per-turn cost caps (with correct arithmetic after CR-02 closure), per-iteration step caps, and 2-second cancellation via PEP 789. The redaction subsystem is now self-consistent (CR-05 closure: `Bearer sk-ant-…` redacts as a single unit; CR-04 closure: the pre-commit hook regex matches the runtime filter's regex exactly, enforced by a parity test and a dedicated CI step). The Claude Code FileDiff branch is reachable from real SDK events (CR-01 closure: per-`stream()` `_pending_tool_calls` dict pairs ToolUseBlock id with ToolResultBlock tool_use_id).
 
-However, four critical defects in the actual code invalidate four documented must-have truths:
+The full non-live test suite is GREEN (233 passed, 2 skipped, 3 deselected in 79.39 s), the D-19 shared contract suite is 17/18 green (1 intentional skip), and the Phase 1 D-18 import-graph guard remains green (7/7). The full Phase 2 backend non-live suite is at 133 passed (4 more than the pre-gap-closure 129 baseline: +1 from CR-01 regression, +1 from CR-02 regression, +2 from CR-04/CR-05 regressions).
 
-- **CR-01 (Truth 21):** `claude_code/adapter.py` reads `tool_name` / `input` from `ToolResultBlock`, but the real `claude_agent_sdk==0.1.81 ToolResultBlock` does not carry those fields. `FileDiff` is dead code in production. Phase 5's `CodeBubble` cannot render file diffs as required by ROADMAP Phase 5 SC #2. Tests pass only because `FakeToolResultBlock` adds the missing fields.
-- **CR-02 (Truth 22):** `ComputerUseCostTracker.record_iteration_usage` uses `+=` instead of `=`. Per-iteration char/4 text-delta estimates accumulate with the authoritative Anthropic usage block, so `Done.tokens_out` and `over_cap()` arithmetic are double-counted.
-- **CR-04 (Truth 19):** The pre-commit `no-secrets.sh` regex set diverges from `logging_filter.SECRET_PATTERNS` (OpenAI alphabet missing `_`/`-`; Bearer whitespace literal vs `\s+`). The `logging_filter.py:31-32` docstring explicitly claims the two sets are intentionally synchronised — that contract is broken.
-- **CR-05 (Truth 20):** Pattern order in `SECRET_PATTERNS` makes `Bearer sk-ant-…` (the canonical Anthropic Authorization header form) rewrite to `Bearer ***REDACTED-ANTHROPIC***` instead of `Bearer ***REDACTED***`, leaving the `Bearer ` prefix visible and breaking downstream scrubbers that look for the Bearer-branch redaction marker.
+**No outstanding gaps.** The four previously-FAILED truths (19, 20, 21, 22) flip to VERIFIED after the gap-closure plans. The advisory CR-03 / WR-01 / WR-02 / WR-03 / WR-08 / WR-09 items remain as carry-forward warnings — they do NOT invalidate any Phase 2 must-have truth and were intentionally out of the gap-closure scope per the prior verification's classification.
 
-**Group analysis:**
-- CR-04 and CR-05 are both `logging_filter.py` / `scripts/no-secrets.sh` defects — a single planning iteration on the redaction subsystem (pattern set + ordering + script regex parity + a CI equivalence check) can close both.
-- CR-01 and CR-02 are independent defects in two different adapters; both are tight, scoped, code-level fixes (one moves a tool_use_id lookup to a `dict`; one changes `+=` to `=` and adds a regression test).
+**Status is `human_needed` (not `passed`) because four items still require BYOK / external-service operator approval.** These are unchanged in shape from the prior report, but two are sharper now: Truth 21's live test was predicted to FAIL pre-CR-01 closure and is now a meaningful confirmation; the pre-commit deliberate-paste test gets two new regression reproductions that previously slipped through.
 
-**Not deferred:** All four gaps map to Phase 2 must-haves and downstream Phase 5 dependencies. Step 9b deferral check against later milestone phases (Phases 3, 4, 5, 6 in ROADMAP.md) found no later phase that explicitly addresses these defects — they must be fixed in Phase 2 closure.
-
-**Advisory (NOT counted as gaps):**
-- **CR-03** (`str(exc)` unredacted on `StreamError.message`) is a Phase 3 SSE concern. Phase 2's SECURE-01 wording only mandates log redaction; Phase 3 (`API-04` BYOK / `API-02` SSE) should add chunk-payload redaction.
-- **WR-01..WR-09** are pre-Phase 3 quality issues (deprecated `asyncio.get_event_loop()`, unbounded `wait`, `or` falsy traps for cap options, errors.py dead code, mutable PricingTable.get return, navigate scheme allow-list). None invalidates a Phase 2 must-have; all should be in the Phase 2 closure plan or carried as Phase 3 prep work.
-
-**Recommendation:** Re-plan with `--gaps` to close CR-01, CR-02, CR-04, CR-05. After fixes, re-verify per the truths listed in `gaps:` frontmatter. The four human-verification items also remain pending.
+**Recommendation:** Phase 2 is code-complete and re-verifier-green for everything automatable. Schedule the four BYOK live-smoke commands when operator credentials are at hand. The carry-forward Warnings (WR-01..WR-09, CR-03) should be tracked into Phase 3 prep or addressed in a follow-up cleanup plan, but they do NOT block phase closure.
 
 ---
 
-_Verified: 2026-05-15T18:16:38Z_
+_Verified: 2026-05-15T21:48:03Z_
 _Verifier: Claude (gsd-verifier)_
