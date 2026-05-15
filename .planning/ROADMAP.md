@@ -58,7 +58,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [x] 02-01-PLAN.md — Wave 1: OpenRouter adapter (AsyncOpenAI + stream_options.include_usage + HTTP-Referer/X-Title + cost cap + cancellation + CLI) — BACKEND-03, BACKEND-06, BACKEND-07
 - [x] 02-02-PLAN.md — Wave 1: Claude Code adapter (claude_agent_sdk.ClaudeSDKClient + interrupt + workspace mkdtemp + step cap 25 + watchdog env var + CLI) — BACKEND-04, BACKEND-06, BACKEND-07, BACKEND-08, BACKEND-09
 - [x] 02-03-PLAN.md — Wave 1: Computer-use adapter (anthropic beta.messages.stream + computer_20251124 + Playwright headless Chromium + opt-in check + step cap 15 + Screenshot emit + CLI) — BACKEND-05, BACKEND-06, BACKEND-07, SECURE-05
-- [ ] 02-04-PLAN.md — Wave 2: Ops — pre-commit (no-secrets, no-deprecated-sdk) + CI extension (pre-commit run, OSS-06 smoke, dual pytest split) + optional live-smoke.yml + REQUIREMENTS.md reconciliation — SECURE-02, OSS-06
+- [x] 02-04-PLAN.md — Wave 2: Ops — pre-commit (no-secrets, no-deprecated-sdk) + CI extension (pre-commit run, OSS-06 smoke, dual pytest split) + optional live-smoke.yml + REQUIREMENTS.md reconciliation — SECURE-02, OSS-06
 
 ### Phase 3: FastAPI Service & Persistent Storage
 **Goal**: A running `uvicorn apps.api.main:app` process exposes thread CRUD, settings, and `POST /threads/{id}/turn` over SSE; routing artifacts load once at lifespan startup; SQLite (WAL + busy_timeout) persists threads, messages, routing decisions, and large blobs by reference; integration tests exercise streaming end-to-end without a browser.

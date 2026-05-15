@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-status: executing
-stopped_at: Completed 02-02-PLAN.md (Claude Code adapter)
-last_updated: "2026-05-15T16:32:23.476Z"
+status: verifying
+stopped_at: Completed 02-04-PLAN.md (pre-commit + CI + REQUIREMENTS/ROADMAP/VALIDATION reconciliation)
+last_updated: "2026-05-15T17:04:12.481Z"
 last_activity: 2026-05-15
 progress:
   total_phases: 6
-  completed_phases: 1
+  completed_phases: 2
   total_plans: 13
-  completed_plans: 12
-  percent: 92
+  completed_plans: 13
+  percent: 100
 ---
 
 # Project State
@@ -27,10 +27,10 @@ See: .planning/PROJECT.md (updated 2026-05-11)
 
 Phase: 02 (backend-adapters-chatchunk-contract) — EXECUTING
 Plan: 5 of 5
-Status: Ready to execute
+Status: Phase complete — ready for verification
 Last activity: 2026-05-15
 
-Progress: [█████████░] 92%
+Progress: [██████████] 100%
 
 ## Performance Metrics
 
@@ -69,6 +69,7 @@ Progress: [█████████░] 92%
 | Phase 02 P01 | 26 | 3 tasks | 11 files |
 | Phase 02 P02 | 29 | 3 tasks | 14 files |
 | Phase 02 P03 | 15 | 3 tasks | 13 files |
+| Phase 02 P04 | 22 | 5 tasks | 9 files |
 
 ## Accumulated Context
 
@@ -122,6 +123,11 @@ Recent decisions affecting current work:
 - [Phase 02]: Phase 2 Plan 03: ComputerUseAdapter cap checks are duplicated at TOP and BOTTOM of every agent-loop iteration. Post-iteration checks fire AFTER steps.increment() AND AFTER final_msg.usage is recorded — the primary cap gates because single-iteration streams cannot trip the cap via pre-increment top-of-loop checks alone (D-19 invariants #2 + #3).
 - [Phase 02]: Phase 2 Plan 03: All 3 Wave 1 adapters now in place; D-19 shared contract suite passes 17/18 (computer_use 6/6 + claude_code 6/6 + openrouter 5/6 with 1 intentional N/A skip). Whole-repo non-live test pass: 229 passed / 2 skipped / 3 deselected.
 - [Phase 02]: Phase 2 Plan 03: ComputerUseAdapter step_counter.py is sibling to claude_code/step_counter.py per D-08 — same class shape, only DEFAULT_STEP_CAP differs (15 vs 25). No cross-import. Future plan can promote to shared module once class shape proves stable.
+- [Phase 02]: Phase 2 Plan 04: Pre-commit no-deprecated-sdk.sh fixed (Rule 1) — RESEARCH Pattern 11's single-regex form silently failed because [^+] consumes the 'i' of 'import' and .* cannot backtrack. Replaced with two-step grep pipeline mirroring no-secrets.sh.
+- [Phase 02]: Phase 2 Plan 04: OSS-06 triad fully landed — (a) pre-commit hook on staged content + uv.lock, (b) CI 'from claude_agent_sdk import ClaudeAgentOptions' import smoke, (c) CI '! grep -q claude-code-sdk uv.lock' assertion. Plus pyproject.toml pin (Wave 0). Four redundant guardrails against re-introducing the deprecated SDK.
+- [Phase 02]: Phase 2 Plan 04: live-smoke.yml weekly cron is OpenRouter-only. Anthropic / computer-use excluded from the cron because computer-use also needs Chromium + COMPUTER_USE_OPT_IN=1. Operators use workflow_dispatch for those. Budget ~$0.43/month per repo with OPENROUTER_API_KEY set.
+- [Phase 02]: Phase 2 Plan 04: REQUIREMENTS.md BACKEND-01 union grew from 6 to 7 variants — ToolResult between ToolCall and FileDiff per CONTEXT D-02. Phase 2 Plans 00-03 already built against 7-variant shape; docs reconciliation only. BACKEND-06 verified as already correct per D-15.
+- [Phase 02]: Phase 2 complete (15/15 requirements satisfied; 5/5 success criteria verifiable). Wave 0 + Wave 1 + Wave 2 all green. Whole-repo non-live suite passes (exit 0). Ready for /gsd-verify-work to validate.
 
 ### Pending Todos
 
@@ -144,6 +150,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-05-15T16:32:23.468Z
-Stopped at: Completed 02-02-PLAN.md (Claude Code adapter)
+Last session: 2026-05-15T17:04:12.471Z
+Stopped at: Completed 02-04-PLAN.md (pre-commit + CI + REQUIREMENTS/ROADMAP/VALIDATION reconciliation)
 Resume file: None

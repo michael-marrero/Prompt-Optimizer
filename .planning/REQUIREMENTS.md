@@ -72,7 +72,7 @@ Requirements for the auto-routing chat milestone. Each maps to a roadmap phase.
 ### Security & Cost Guards
 
 - [x] **SECURE-01**: Python logging configured with a redaction filter that strips `sk-…`, `sk-ant-…`, `Bearer \S+` from any log record before it reaches a handler
-- [ ] **SECURE-02**: Pre-commit hook greps staged content for `sk-` and `sk-ant-` prefixes and blocks the commit if found
+- [x] **SECURE-02**: Pre-commit hook greps staged content for `sk-` and `sk-ant-` prefixes and blocks the commit if found
 - [x] **SECURE-03**: Root `.gitignore` excludes `.env`, `*.db`, `*.db-journal`, `*.db-wal`, `__pycache__/`, `.venv/`, `chat.db` from the first commit that touches key handling
 - [x] **SECURE-04**: BYOK keys live only in process memory + an OS keyring entry (via `keyring`) if the user opts in; never written to SQLite, JSON, or log files
 - [x] **SECURE-05**: Computer-use is OFF by default; setting `COMPUTER_USE_OPT_IN=1` (env or settings panel) is required to enable it
@@ -85,7 +85,7 @@ Requirements for the auto-routing chat milestone. Each maps to a roadmap phase.
 - [ ] **OSS-03**: `.env.example` enumerates every key the app reads with one-line comments
 - [ ] **OSS-04**: README rewritten — three golden-path demo prompts ("build me a finance app" → Claude Code; "what's the capital of France?" → cheap chat model; "open this URL and check the price" → computer-use), screenshots, quickstart that works from a clean clone
 - [ ] **OSS-05**: CORS configured explicitly between Next.js dev server and FastAPI; no `allow_origins=["*"]`
-- [ ] **OSS-06**: CI smoke test asserts `from claude_agent_sdk import ClaudeAgentOptions` to catch any regression to the deprecated `claude-code-sdk`
+- [x] **OSS-06**: CI smoke test asserts `from claude_agent_sdk import ClaudeAgentOptions` to catch any regression to the deprecated `claude-code-sdk`
 - [ ] **OSS-07**: Playwright E2E test exercises the full SSE pipe (browser → Next.js → FastAPI → OpenRouter → SSE back) to catch AI SDK v5 message-format drift
 - [ ] **OSS-08**: Fresh-clone manual UAT — a contributor on a clean machine reaches the first streamed response in under 10 minutes following only the README
 
@@ -182,7 +182,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | STORE-05 | Phase 3 | Pending |
 | STORE-06 | Phase 3 | Pending |
 | SECURE-01 | Phase 2 | Complete |
-| SECURE-02 | Phase 2 | Pending |
+| SECURE-02 | Phase 2 | Complete |
 | SECURE-03 | Phase 1 | Complete |
 | SECURE-04 | Phase 2 | Complete |
 | SECURE-05 | Phase 2 | Complete |
@@ -192,7 +192,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | OSS-03 | Phase 6 | Pending |
 | OSS-04 | Phase 6 | Pending |
 | OSS-05 | Phase 3 | Pending |
-| OSS-06 | Phase 2 | Pending |
+| OSS-06 | Phase 2 | Complete |
 | OSS-07 | Phase 6 | Pending |
 | OSS-08 | Phase 6 | Pending |
 
