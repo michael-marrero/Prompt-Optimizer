@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Phase 2 context gathered
-last_updated: "2026-05-15T14:58:16.751Z"
+stopped_at: Completed 02-01-PLAN.md (OpenRouter adapter)
+last_updated: "2026-05-15T15:30:57.595Z"
 last_activity: 2026-05-15
 progress:
   total_phases: 6
   completed_phases: 1
   total_plans: 13
-  completed_plans: 9
-  percent: 69
+  completed_plans: 10
+  percent: 77
 ---
 
 # Project State
@@ -26,11 +26,11 @@ See: .planning/PROJECT.md (updated 2026-05-11)
 ## Current Position
 
 Phase: 02 (backend-adapters-chatchunk-contract) — EXECUTING
-Plan: 2 of 5
+Plan: 3 of 5
 Status: Ready to execute
 Last activity: 2026-05-15
 
-Progress: [███████░░░] 69%
+Progress: [████████░░] 77%
 
 ## Performance Metrics
 
@@ -66,6 +66,7 @@ Progress: [███████░░░] 69%
 | Phase 01 P07 | 15m | 4 tasks | 12 files |
 | Phase 01 P08 | 10m | 4 tasks | 5 files |
 | Phase 02 P00 | 13 | 4 tasks | 17 files |
+| Phase 02 P01 | 26 | 3 tasks | 11 files |
 
 ## Accumulated Context
 
@@ -108,6 +109,9 @@ Recent decisions affecting current work:
 - [Phase ?]: Phase 2 Plan 00: D-19 contract suite stub lazy-imports adapter classes inside conftest.adapter_factory (try/except ImportError -> pytest.skip). test_adapter_contract.py has zero module-level adapter imports (B3 fix verified by negative grep).
 - [Phase ?]: Phase 2 Plan 00: config/pricing.json _default row locked at {input_per_mtok: 5.00, output_per_mtok: 20.00} per CONTEXT specifics line 266 — conservative upper bound so cost cap trips even on unknown OpenRouter slugs.
 - [Phase ?]: Phase 2 Plan 00: apps/api uses pathlib.Path(__file__).resolve().parents[2] for PROJECT_ROOT (CONTEXT line 245) rather than the Phase 1 os.path.dirname chain. Establishes pathlib as the convention inside the apps/ subtree.
+- [Phase 02]: openai SDK 2.36 AuthenticationError + APIStatusError constructors dereference response.request — passing response=None per RESEARCH Pattern 3 raises AttributeError. Adapter and tests construct minimal httpx.Request + httpx.Response(status=401) via _build_missing_key_error / _make_auth_error helpers.
+- [Phase 02]: PROVIDER_ERROR_MAP isinstance lookup fails after Phase 1 D-18 guard purges openai from sys.modules. Fix: map_provider_error compares by fully-qualified class name as fallback to isinstance. test_provider_error_map_has_all_four_classes also rewritten to compare by name.
+- [Phase 02]: D-19 contract suite for openrouter parameterization passes 5/6 invariants (test_step_cap_aborts skipped per pytest.skip — N/A for single-round-trip OpenRouter). 24 unit tests + 5 parametric cases pass.
 
 ### Pending Todos
 
@@ -130,6 +134,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-05-15T14:57:43.733Z
-Stopped at: Phase 2 context gathered
+Last session: 2026-05-15T15:30:57.587Z
+Stopped at: Completed 02-01-PLAN.md (OpenRouter adapter)
 Resume file: None

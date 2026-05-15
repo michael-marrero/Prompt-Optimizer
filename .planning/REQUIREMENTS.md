@@ -21,11 +21,11 @@ Requirements for the auto-routing chat milestone. Each maps to a roadmap phase.
 
 - [x] **BACKEND-01**: `ChatChunk` discriminated union (`TextDelta | ToolCall | Screenshot | FileDiff | StreamError | Done`) is the single contract between adapters, storage, and UI
 - [x] **BACKEND-02**: Common `BackendAdapter` Protocol with one method: `async def stream(prompt, history, options) -> AsyncIterator[ChatChunk]`
-- [ ] **BACKEND-03**: OpenRouter adapter streams chat models (Claude Sonnet, GPT-5, Gemini, DeepSeek, Qwen) using OpenAI SDK v1.40+ pointed at `https://openrouter.ai/api/v1`, with HTTP-Referer / X-Title attribution headers
+- [x] **BACKEND-03**: OpenRouter adapter streams chat models (Claude Sonnet, GPT-5, Gemini, DeepSeek, Qwen) using OpenAI SDK v1.40+ pointed at `https://openrouter.ai/api/v1`, with HTTP-Referer / X-Title attribution headers
 - [ ] **BACKEND-04**: Claude Code adapter uses `claude-agent-sdk 0.1.80+` (NOT deprecated `claude-code-sdk`); streams tool calls + file diffs + final summary as `ChatChunk`s
 - [ ] **BACKEND-05**: Computer-use adapter uses `anthropic 0.40+` with `computer_20251124` tool + `computer-use-2025-11-24` beta header on Claude Opus 4.7 or Sonnet 4.6; streams screenshots + action narration
-- [ ] **BACKEND-06**: Each adapter enforces a hard per-turn USD cap (default $0.50) and per-iteration step cap (25 for Claude Code, 15 for computer-use) at the adapter boundary
-- [ ] **BACKEND-07**: Mid-stream cancellation — browser tab close / stop button propagates to upstream provider via `query.interrupt()` (Claude Code), aborted HTTP request (OpenRouter), or equivalent
+- [x] **BACKEND-06**: Each adapter enforces a hard per-turn USD cap (default $0.50) and per-iteration step cap (25 for Claude Code, 15 for computer-use) at the adapter boundary
+- [x] **BACKEND-07**: Mid-stream cancellation — browser tab close / stop button propagates to upstream provider via `query.interrupt()` (Claude Code), aborted HTTP request (OpenRouter), or equivalent
 - [ ] **BACKEND-08**: Claude Code runs in a per-thread ephemeral workspace by default; opt-in flag required to point at user's repo `cwd`
 - [ ] **BACKEND-09**: `CLAUDE_ENABLE_STREAM_WATCHDOG=1` set to prevent the known Claude Code SDK stream-stall hang
 
@@ -143,11 +143,11 @@ Which phases cover which requirements. Updated during roadmap creation.
 | ROUTER-07 | Phase 1 | Complete |
 | BACKEND-01 | Phase 2 | Complete |
 | BACKEND-02 | Phase 2 | Complete |
-| BACKEND-03 | Phase 2 | Pending |
+| BACKEND-03 | Phase 2 | Complete |
 | BACKEND-04 | Phase 2 | Pending |
 | BACKEND-05 | Phase 2 | Pending |
-| BACKEND-06 | Phase 2 | Pending |
-| BACKEND-07 | Phase 2 | Pending |
+| BACKEND-06 | Phase 2 | Complete |
+| BACKEND-07 | Phase 2 | Complete |
 | BACKEND-08 | Phase 2 | Pending |
 | BACKEND-09 | Phase 2 | Pending |
 | API-01 | Phase 3 | Pending |
