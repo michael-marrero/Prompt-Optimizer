@@ -1,0 +1,42 @@
+name: Live smoke (manual + weekly)
+
+# Optional opt-in workflow that exercises the REAL OpenRouter API.
+# - Manual trigger: workflow_dispatch (any operator with the secret set).
+# - Scheduled trigger: weekly Monday 06:00 UTC (light cadence, low wallet impact).
+# - Gated by `secrets.OPENROUTER_API_KEY != ''` so forks without the secret no-op.
+# - `continue-on-error: true` keeps repo health green even if the provider hiccups.
+# - Anthropic / computer-use are NOT in the weekly cron (computer-use also needs
+#   Chromium + COMPUTER_USE_OPT_IN). Operators can dispatch manually with secrets.
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 6 * * 1"
+
+jobs:
+  live-smoke:
+    runs-on: ubuntu-latest
+    if: ${{ secrets.OPENROUTER_API_KEY != '' }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          lfs: true
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          enable-cache: true
+
+      - name: Install Python 3.11
+        run: uv python install 3.11
+
+      - name: Sync dependencies
+        run: uv sync --locked --all-extras --dev
+
+      - name: Live smoke (OpenRouter only)
+        continue-on-error: true
+        env:
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+        run: |
+          uv run pytest -m live apps/api/backends/openrouter -x --maxfail=1
