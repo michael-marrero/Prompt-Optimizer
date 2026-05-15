@@ -4,14 +4,14 @@ milestone: v1.0
 milestone_name: milestone
 status: executing
 stopped_at: Phase 2 context gathered
-last_updated: "2026-05-15T04:52:23.184Z"
-last_activity: 2026-05-15 -- Phase 02 planning complete
+last_updated: "2026-05-15T14:58:16.751Z"
+last_activity: 2026-05-15
 progress:
   total_phases: 6
   completed_phases: 1
   total_plans: 13
-  completed_plans: 8
-  percent: 62
+  completed_plans: 9
+  percent: 69
 ---
 
 # Project State
@@ -21,16 +21,16 @@ progress:
 See: .planning/PROJECT.md (updated 2026-05-11)
 
 **Core value:** Every prompt routes to the LLM or agent best suited to deliver a high-quality answer, with no manual model selection from the user.
-**Current focus:** Phase 01 — router-brain-foundation
+**Current focus:** Phase 02 — backend-adapters-chatchunk-contract
 
 ## Current Position
 
-Phase: 2
-Plan: Not started
+Phase: 02 (backend-adapters-chatchunk-contract) — EXECUTING
+Plan: 2 of 5
 Status: Ready to execute
-Last activity: 2026-05-15 -- Phase 02 planning complete
+Last activity: 2026-05-15
 
-Progress: [██████████] 100%
+Progress: [███████░░░] 69%
 
 ## Performance Metrics
 
@@ -65,6 +65,7 @@ Progress: [██████████] 100%
 | Phase 01 P06 | 51m | 3 tasks | 10 files |
 | Phase 01 P07 | 15m | 4 tasks | 12 files |
 | Phase 01 P08 | 10m | 4 tasks | 5 files |
+| Phase 02 P00 | 13 | 4 tasks | 17 files |
 
 ## Accumulated Context
 
@@ -103,6 +104,10 @@ Recent decisions affecting current work:
 - [Phase ?]: Phase 1 Plan 08: argmax-agreement floors set as CANARIES (0.65 task_type / 0.10 model_router) — above random-baseline 1/n_classes but below observed first-run values. Plan 05's Option-A retrain legitimately moves many argmaxes; floors catch vectorizer/scaler refit accidents (collapse near random), not the documented retrain shift.
 - [Phase ?]: Phase 1 Plan 08: route_prompt signature stays BACKWARD-COMPATIBLE via optional agentic_intent_artifacts kwarg. main() pre-loads all 3 calibrated heads + model_mapping before the REPL loop. NEW result['routing_decision'] key surfaces alongside legacy keys; print_route_result emits Rationale/Confidence with graceful degradation when key absent.
 - [Phase ?]: Phase 1 Plan 08 carry-forwards (NOT regressions): canary-set ECE > 0.10 on all 3 heads (Plan 07 finding — proxy y_true; not directly comparable to per-stage training ECE); 4 openrouter canary rows misroute to claude_code (D-01 cascade boundary); ROUTER-06 tier_tiebreaker fires 0/42 (calibrated router top-1 is sharp). All three deferred to follow-up plans per Plan 07 SUMMARY guidance.
+- [Phase ?]: Phase 2 Plan 00: RedactionFilter Pattern 10 recipe fixed — Filter on root logger is not consulted when child-logger records propagate to parent handlers (Python logging quirk). Added logging.setLogRecordFactory wrapper that redacts every LogRecord at creation time. RedactionFilter on root + handlers retained as belt-and-suspenders. Both layers clear record.args (Pitfall 8).
+- [Phase ?]: Phase 2 Plan 00: D-19 contract suite stub lazy-imports adapter classes inside conftest.adapter_factory (try/except ImportError -> pytest.skip). test_adapter_contract.py has zero module-level adapter imports (B3 fix verified by negative grep).
+- [Phase ?]: Phase 2 Plan 00: config/pricing.json _default row locked at {input_per_mtok: 5.00, output_per_mtok: 20.00} per CONTEXT specifics line 266 — conservative upper bound so cost cap trips even on unknown OpenRouter slugs.
+- [Phase ?]: Phase 2 Plan 00: apps/api uses pathlib.Path(__file__).resolve().parents[2] for PROJECT_ROOT (CONTEXT line 245) rather than the Phase 1 os.path.dirname chain. Establishes pathlib as the convention inside the apps/ subtree.
 
 ### Pending Todos
 
@@ -125,6 +130,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-05-15T01:42:36.737Z
+Last session: 2026-05-15T14:57:43.733Z
 Stopped at: Phase 2 context gathered
-Resume file: .planning/phases/02-backend-adapters-chatchunk-contract/02-CONTEXT.md
+Resume file: None
