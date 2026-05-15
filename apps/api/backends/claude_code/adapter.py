@@ -105,6 +105,69 @@ from apps.api.backends.protocol import AdapterOptions, Message
 logger = logging.getLogger(__name__)
 
 
+# Class-name sets for duck-typed message / block dispatch. We match
+# on ``type(obj).__name__`` so test fakes (FakeAssistantMessage,
+# FakeTextBlock, ...) work without monkeypatching the SDK imports
+# above. The SDK's own classes match by ``isinstance`` too — both
+# paths are exercised below for redundancy.
+_ASSISTANT_NAMES: Final[frozenset[str]] = frozenset(
+    ["AssistantMessage", "FakeAssistantMessage"]
+)
+_USER_NAMES: Final[frozenset[str]] = frozenset(
+    ["UserMessage", "FakeUserMessage"]
+)
+_SYSTEM_NAMES: Final[frozenset[str]] = frozenset(
+    ["SystemMessage", "FakeSystemMessage"]
+)
+_RESULT_NAMES: Final[frozenset[str]] = frozenset(
+    ["ResultMessage", "FakeResultMessage"]
+)
+_TEXT_BLOCK_NAMES: Final[frozenset[str]] = frozenset(
+    ["TextBlock", "FakeTextBlock"]
+)
+_TOOL_USE_NAMES: Final[frozenset[str]] = frozenset(
+    ["ToolUseBlock", "FakeToolUseBlock"]
+)
+_TOOL_RESULT_NAMES: Final[frozenset[str]] = frozenset(
+    ["ToolResultBlock", "FakeToolResultBlock"]
+)
+_THINKING_NAMES: Final[frozenset[str]] = frozenset(
+    ["ThinkingBlock", "FakeThinkingBlock"]
+)
+
+
+def _is_assistant(msg: object) -> bool:
+    return isinstance(msg, AssistantMessage) or type(msg).__name__ in _ASSISTANT_NAMES
+
+
+def _is_user(msg: object) -> bool:
+    return isinstance(msg, UserMessage) or type(msg).__name__ in _USER_NAMES
+
+
+def _is_system(msg: object) -> bool:
+    return isinstance(msg, SystemMessage) or type(msg).__name__ in _SYSTEM_NAMES
+
+
+def _is_result(msg: object) -> bool:
+    return isinstance(msg, ResultMessage) or type(msg).__name__ in _RESULT_NAMES
+
+
+def _is_text_block(block: object) -> bool:
+    return isinstance(block, TextBlock) or type(block).__name__ in _TEXT_BLOCK_NAMES
+
+
+def _is_tool_use(block: object) -> bool:
+    return isinstance(block, ToolUseBlock) or type(block).__name__ in _TOOL_USE_NAMES
+
+
+def _is_tool_result(block: object) -> bool:
+    return isinstance(block, ToolResultBlock) or type(block).__name__ in _TOOL_RESULT_NAMES
+
+
+def _is_thinking(block: object) -> bool:
+    return isinstance(block, ThinkingBlock) or type(block).__name__ in _THINKING_NAMES
+
+
 # Locked v1 tool restriction (CONTEXT discretion line 142). The
 # ``Final`` annotation makes the mutability intent explicit — type
 # checkers warn on reassignment. Order mirrors RESEARCH Pattern 4 line
@@ -175,9 +238,20 @@ class ClaudeCodeAdapter:
         # D-19 invariant #6: typed exception BEFORE returning so
         # missing-key situations surface synchronously, not as a half-
         # streamed StreamError chunk.
+        #
+        # The preflight is skipped when ``client_factory`` is provided
+        # (test injection) — the factory bypasses the real SDK and
+        # therefore does not consult ANTHROPIC_API_KEY. Without this
+        # gate the D-19 shared contract suite cannot construct the
+        # adapter (the conftest's adapter_factory passes a
+        # client_factory and no api_key).
         import os
 
-        if api_key is None and not os.environ.get("ANTHROPIC_API_KEY"):
+        if (
+            client_factory is None
+            and api_key is None
+            and not os.environ.get("ANTHROPIC_API_KEY")
+        ):
             raise _missing_api_key_error()
 
         self._api_key = api_key
@@ -245,28 +319,32 @@ class ClaudeCodeAdapter:
             await client.query(prompt=prompt)
 
             # ----- Stage 4: per-message loop -------------------------
+            # Dispatch uses duck-typed helpers (``_is_*``) so test fakes
+            # work without monkeypatching the SDK imports above. The
+            # helpers fall back from ``isinstance`` to a class-name
+            # check; both real SDK objects and Fake* dataclasses match.
             async for msg in client.receive_response():
                 # ResultMessage marks the end of one turn. Use it as
                 # the natural loop terminator so the SDK closes the
                 # underlying generator cleanly (Pitfall 5).
-                if isinstance(msg, ResultMessage):
+                if _is_result(msg):
                     tracker.record_result(msg)
                     break
 
-                if isinstance(msg, AssistantMessage):
+                if _is_assistant(msg):
                     steps.increment()  # D-15 — one step per AssistantMessage
                     for block in getattr(msg, "content", []) or []:
-                        if isinstance(block, TextBlock):
+                        if _is_text_block(block):
                             text = getattr(block, "text", "")
                             tracker.record_output_text(text)
                             yield TextDelta(text=text)
-                        elif isinstance(block, ToolUseBlock):
+                        elif _is_tool_use(block):
                             yield ToolCall(
                                 tool_call_id=getattr(block, "id", ""),
                                 tool_name=getattr(block, "name", ""),
                                 arguments=getattr(block, "input", {}) or {},
                             )
-                        elif isinstance(block, ThinkingBlock):
+                        elif _is_thinking(block):
                             # v1 surface: drop ThinkingBlocks. The UI
                             # has no rendering path for them yet.
                             continue
@@ -274,20 +352,24 @@ class ClaudeCodeAdapter:
                     if usage is not None:
                         tracker.record_assistant_usage(usage)
 
-                elif isinstance(msg, UserMessage):
+                elif _is_user(msg):
                     # In claude-agent-sdk, UserMessages within a turn
                     # carry tool_result blocks injected by the SDK
                     # after it executed a ToolUse on Claude's behalf
                     # (RESEARCH Pattern 4 lines 776-778).
                     for block in getattr(msg, "content", []) or []:
-                        if isinstance(block, ToolResultBlock):
+                        if _is_tool_result(block):
                             tool_use_id = getattr(block, "tool_use_id", "")
                             tool_name = getattr(block, "tool_name", "")
                             content = getattr(block, "content", "")
                             is_error = getattr(block, "is_error", False)
                             if tool_name in ("Edit", "Write"):
                                 block_input = getattr(block, "input", None) or {}
-                                path = block_input.get("path", "") if isinstance(block_input, dict) else ""
+                                path = (
+                                    block_input.get("path", "")
+                                    if isinstance(block_input, dict)
+                                    else ""
+                                )
                                 yield FileDiff(
                                     tool_call_id=tool_use_id,
                                     path=path,
@@ -305,7 +387,7 @@ class ClaudeCodeAdapter:
                                     is_error=is_error,
                                 )
 
-                elif isinstance(msg, SystemMessage):
+                elif _is_system(msg):
                     logger.debug("SystemMessage: %r", getattr(msg, "subtype", "?"))
                 else:
                     logger.debug("Unknown message type: %r", type(msg).__name__)
