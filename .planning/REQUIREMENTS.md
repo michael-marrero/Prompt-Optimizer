@@ -19,7 +19,7 @@ Requirements for the auto-routing chat milestone. Each maps to a roadmap phase.
 
 ### Backend Adapters
 
-- [x] **BACKEND-01**: `ChatChunk` discriminated union (`TextDelta | ToolCall | Screenshot | FileDiff | StreamError | Done`) is the single contract between adapters, storage, and UI
+- [x] **BACKEND-01**: `ChatChunk` discriminated union (`TextDelta | ToolCall | ToolResult | FileDiff | Screenshot | StreamError | Done`) is the single contract between adapters, storage, and UI
 - [x] **BACKEND-02**: Common `BackendAdapter` Protocol with one method: `async def stream(prompt, history, options) -> AsyncIterator[ChatChunk]`
 - [x] **BACKEND-03**: OpenRouter adapter streams chat models (Claude Sonnet, GPT-5, Gemini, DeepSeek, Qwen) using OpenAI SDK v1.40+ pointed at `https://openrouter.ai/api/v1`, with HTTP-Referer / X-Title attribution headers
 - [x] **BACKEND-04**: Claude Code adapter uses `claude-agent-sdk 0.1.80+` (NOT deprecated `claude-code-sdk`); streams tool calls + file diffs + final summary as `ChatChunk`s
