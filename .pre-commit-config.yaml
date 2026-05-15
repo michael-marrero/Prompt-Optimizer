@@ -1,0 +1,17 @@
+# Phase 2 / SECURE-02 + OSS-06 pre-commit hooks.
+# Two LOCAL hooks only — no remote repo references (D-09 keeps the supply chain narrow).
+repos:
+  - repo: local
+    hooks:
+      - id: no-secrets
+        name: Block secrets in staged content
+        entry: scripts/no-secrets.sh
+        language: script
+        pass_filenames: false
+        stages: [pre-commit]
+      - id: no-deprecated-claude-code-sdk
+        name: Block deprecated claude-code-sdk
+        entry: scripts/no-deprecated-sdk.sh
+        language: script
+        pass_filenames: false
+        stages: [pre-commit]
