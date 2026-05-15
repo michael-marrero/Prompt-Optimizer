@@ -32,7 +32,10 @@ import os
 # var from os.environ.
 os.environ.setdefault("CLAUDE_ENABLE_STREAM_WATCHDOG", "1")
 
-# NOTE: the adapter re-export lives below in Task 2 of Plan 02-02. The
-# Task 1 commit deliberately omits it so this package is importable
-# during the RED phase, before adapter.py exists. See Plan 02-01
-# Decision #4 for the same precedent in the OpenRouter package.
+# Public re-export — kept below the watchdog setdefault so the env var
+# is in place before the adapter module loads (adapter.py imports the
+# SDK at module level; the SDK consults the env var lazily on connect
+# but defensive ordering keeps the contract simple).
+from apps.api.backends.claude_code.adapter import ClaudeCodeAdapter  # noqa: E402
+
+__all__ = ["ClaudeCodeAdapter"]
