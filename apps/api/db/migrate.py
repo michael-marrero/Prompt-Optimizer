@@ -140,7 +140,19 @@ async def up_to_latest(db: aiosqlite.Connection) -> None:
             # migration MUST split the SQL on ``;`` and execute
             # statements individually instead.
             await db.executescript(sql)
-            if current < 0:
+            # ``schema_v0.sql`` ITSELF seeds the schema_meta row
+            # (``INSERT INTO schema_meta (version) VALUES (0)``). On a
+            # fresh DB the runner therefore sees the row land mid-
+            # script and must UPDATE rather than INSERT to avoid a
+            # duplicate row. We re-read schema_meta after the script
+            # to make the choice safely; if schema_meta is somehow
+            # still empty (a future migration that doesn't seed),
+            # INSERT does the right thing.
+            async with db.execute(
+                "SELECT COUNT(*) FROM schema_meta"
+            ) as cur:
+                meta_count = (await cur.fetchone())[0]
+            if meta_count == 0:
                 await db.execute(
                     "INSERT INTO schema_meta (version) VALUES (?)",
                     (version,),
