@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 03-00-PLAN.md (Wave 0 scaffolding)
-last_updated: "2026-05-16T17:57:31.338Z"
+stopped_at: Completed 03-01-PLAN.md (Wave 1 storage layer)
+last_updated: "2026-05-16T18:54:14.095Z"
 last_activity: 2026-05-16
 progress:
   total_phases: 6
   completed_phases: 2
   total_plans: 23
-  completed_plans: 17
-  percent: 74
+  completed_plans: 18
+  percent: 78
 ---
 
 # Project State
@@ -26,11 +26,11 @@ See: .planning/PROJECT.md (updated 2026-05-11)
 ## Current Position
 
 Phase: 03 (fastapi-service-persistent-storage) — EXECUTING
-Plan: 2 of 7
+Plan: 3 of 7
 Status: Ready to execute
 Last activity: 2026-05-16
 
-Progress: [███████░░░] 74%
+Progress: [████████░░] 78%
 
 ## Performance Metrics
 
@@ -75,6 +75,7 @@ Progress: [███████░░░] 74%
 | Phase 02 P06 | 5 | 1 tasks | 2 files |
 | Phase 02 P07 | 3 | 1 tasks | 5 files |
 | Phase 03 P00 | 12 | 5 tasks | 11 files |
+| Phase 03 P01 | 21 | 3 tasks | 8 files |
 
 ## Accumulated Context
 
@@ -143,6 +144,9 @@ Recent decisions affecting current work:
 - [Phase ?]: [Phase 03]: Phase 3 Plan 00 (Wave 0): test_smoke.py negative-grep guard builds its forbidden regex at runtime from string fragments to avoid source-file self-match; subprocess grep uses --include='*.py' --include='*.sql' to skip .pyc files. conftest.py docstrings reference 'the synchronous FastAPI test-client wrapper' by description rather than literal name to keep the CLI guard clean (Rule 1 fix).
 - [Phase ?]: [Phase 03]: Phase 3 Plan 00 (Wave 0): apps/api/paths.py uses Path(__file__).resolve().parents[2] same as apps/api/__init__.py so PROJECT_ROOT is interchangeable. PROMPT_OPTIMIZER_HOME env override read at import time; tests monkeypatch + importlib.reload to flip.
 - [Phase ?]: [Phase 03]: Phase 3 Plan 00 (Wave 0): apps/api/tests/conftest.py uses B3 lazy-import pattern (try/except ImportError -> pytest.skip) for every Wave 1-6 producer module (apps.api.main, apps.api.lifespan, apps.api.db.connect, apps.api.db.migrate) so the conftest is collectable in Wave 0 before those modules exist.
+- [Phase ?]: [Phase 03]: Phase 3 Plan 01 (Wave 1): RESEARCH Open Question 2 resolved as option (b) — schema_v1.sql is CREATE INDEX idx_messages_thread_id_created_at ON messages(thread_id, created_at). Option (a) pinned BOOLEAN rejected (too trivial); option (c) routing_feedback table rejected (Phase 3↔5 coupling).
+- [Phase ?]: [Phase 03]: Phase 3 Plan 01 (Wave 1) Rule 1 deviation: migrate runner's INSERT-vs-UPDATE choice for schema_meta cannot use the captured _current_version() result — schema_v0.sql itself seeds version 0 inside executescript(), so the post-script row count must be re-read. Fix: SELECT COUNT(*) FROM schema_meta after executescript and choose INSERT only when meta_count == 0. Test test_up_to_latest_idempotent enforces single-row invariant.
+- [Phase ?]: [Phase 03]: Phase 3 Plan 01 (Wave 1): queries.py duck-types the in-flight RoutingDecision via getattr(decision, ...) + signals_dict.get(...). apps.api.db.* never imports from src.routing.*; the Wave 4 turn route handler is the single import edge. Preserves Phase 1 D-18 import-graph guard when src/routing/ is tested in isolation.
 
 ### Pending Todos
 
@@ -165,6 +169,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-05-16T17:57:31.330Z
-Stopped at: Completed 03-00-PLAN.md (Wave 0 scaffolding)
+Last session: 2026-05-16T18:54:14.087Z
+Stopped at: Completed 03-01-PLAN.md (Wave 1 storage layer)
 Resume file: None

@@ -62,9 +62,9 @@ Requirements for the auto-routing chat milestone. Each maps to a roadmap phase.
 
 ### Persistent Storage
 
-- [ ] **STORE-01**: SQLite via `aiosqlite 0.20+` with `PRAGMA journal_mode=WAL; synchronous=NORMAL; busy_timeout=5000` on first connect
-- [ ] **STORE-02**: Schema: `threads(id, title, created_at, updated_at)`, `messages(id, thread_id, role, content_blocks JSON, backend_used, model_used, cost_usd, latency_ms, tokens_in, tokens_out, created_at)`, `routing_decisions(id, message_id, task_type, task_confidence, agentic_intent, agentic_confidence, predicted_model, rationale, decided_at)`
-- [ ] **STORE-03**: Schema migrations managed from day one (Alembic or SQLModel-native); never break existing user DBs across releases
+- [x] **STORE-01**: SQLite via `aiosqlite 0.20+` with `PRAGMA journal_mode=WAL; synchronous=NORMAL; busy_timeout=5000` on first connect
+- [x] **STORE-02**: Schema: `threads(id, title, created_at, updated_at)`, `messages(id, thread_id, role, content_blocks JSON, backend_used, model_used, cost_usd, latency_ms, tokens_in, tokens_out, created_at)`, `routing_decisions(id, message_id, task_type, task_confidence, agentic_intent, agentic_confidence, predicted_model, rationale, decided_at)`
+- [x] **STORE-03**: Schema migrations managed from day one (Alembic or SQLModel-native); never break existing user DBs across releases
 - [ ] **STORE-04**: Large blobs (screenshots ≥256 KB, large diffs) written to disk and referenced by content hash from the DB row
 - [ ] **STORE-05**: Assistant message persisted once on `Done` chunk (buffered in memory during stream); no per-chunk writes
 - [ ] **STORE-06**: Every routing decision appended to a local `.planning/data/routing_decisions.jsonl` log file alongside the DB row, for offline analysis
@@ -175,9 +175,9 @@ Which phases cover which requirements. Updated during roadmap creation.
 | UI-15 | Phase 5 | Pending |
 | UI-16 | Phase 5 | Pending |
 | UI-17 | Phase 4 | Pending |
-| STORE-01 | Phase 3 | Pending |
-| STORE-02 | Phase 3 | Pending |
-| STORE-03 | Phase 3 | Pending |
+| STORE-01 | Phase 3 | Complete |
+| STORE-02 | Phase 3 | Complete |
+| STORE-03 | Phase 3 | Complete |
 | STORE-04 | Phase 3 | Pending |
 | STORE-05 | Phase 3 | Pending |
 | STORE-06 | Phase 3 | Pending |
