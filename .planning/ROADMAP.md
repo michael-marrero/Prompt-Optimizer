@@ -74,7 +74,14 @@ Decimal phases appear between their surrounding integers in numeric order.
   4. Each routing decision is also appended as a JSON line to `.planning/data/routing_decisions.jsonl`; screenshots ≥256 KB and large diffs are written under `~/.prompt-optimizer/blobs/<sha256>` and referenced by hash from the DB row (verified by a computer-use simulation test).
   5. A schema-migration test upgrades a v0 DB (created from the initial `schema.sql`) to v1 using the chosen migration tool (Alembic or yoyo) without data loss; CORS middleware is configured with the explicit Next.js dev-server origin (no `allow_origins=["*"]`); BYOK keys submitted via `PATCH /settings` never appear in the DB or in any log line (regression test).
 
-**Plans**: TBD
+**Plans**: 7 plans
+- [ ] 03-00-PLAN.md — Wave 0: Scaffolding (pyproject.toml deps, apps/api/paths.py, test fixtures, schema_v0_seed.sql, API-08 negative-grep guard) — API-08
+- [ ] 03-01-PLAN.md — Wave 1: Storage layer (aiosqlite open_db with D-03 pragmas, schema_v0.sql, schema_v1.sql index, migration runner, Pydantic models, ~11 typed async queries) — STORE-01, STORE-02, STORE-03
+- [ ] 03-02-PLAN.md — Wave 2: App shell + healthz + CORS (lifespan, main.py with CORSMiddleware explicit origin, settings.py D-12 STRICT AND, GET /healthz D-18 status dots) — API-01, OSS-05
+- [ ] 03-03-PLAN.md — Wave 3: Thread CRUD + settings (POST/GET/PATCH/DELETE /threads + GET masked / PATCH merge-patch /settings with adapter cache invalidation) — API-03
+- [ ] 03-04-PLAN.md — Wave 4: SSE turn handler (POST /threads/{id}/turn — the heart; asyncio.to_thread decide + EventSourceResponse ping=15 + buffer-and-persist-on-Done + jsonl log + override_backend) — API-02, API-05, API-06, API-07, STORE-05, STORE-06
+- [ ] 03-05-PLAN.md — Wave 5: Blob storage + cascade unlink (apps/api/blobs.py sha256 by-hash transcoder + delete_thread blob walk + path-traversal defense) — STORE-04
+- [ ] 03-06-PLAN.md — Wave 6: Rename endpoint + secure regression + boot smoke (D-17 one-shot OpenRouter rename + API-04 disclosure regression + uvicorn boot <3s) — API-04
 
 ### Phase 4: Minimal Chat UI (OpenRouter Backend)
 **Goal**: A running `next dev` app delivers a single-input multi-turn chat that streams OpenRouter responses through a Next.js route handler proxying FastAPI; the routing chip and one-line rationale appear on every assistant message; streaming markdown + code blocks render without flicker; stop button preserves partial responses. This phase exists to prove the SSE pipe end-to-end with one backend before adding two more.
