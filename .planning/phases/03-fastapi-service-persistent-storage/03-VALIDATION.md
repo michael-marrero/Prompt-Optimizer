@@ -44,7 +44,7 @@ created: 2026-05-15
 |---------|------|------|-------------|------------|-----------------|-----------|-------------------|-------------|--------|
 | 3-00-01 | 00 | 0 | API-08 | — | Enforce httpx + ASGITransport (no TestClient) | meta | `! grep -rE 'from fastapi.testclient\|fastapi\.testclient\.TestClient' apps/api/tests/` | ❌ Wave 0 | ⬜ pending |
 | 3-00-02 | 00 | 0 | API-01 / STORE-01 / STORE-02 | — | conftest fixtures load before app startup | unit | `uv run pytest apps/api/tests/test_smoke.py -x` (Wave 0 sanity) | ❌ Wave 0 | ⬜ pending |
-| 3-01-01 | 01 | 1 | STORE-01 / STORE-02 | T-03-Mig | Migrations idempotent + pragmas applied | unit | `uv run pytest apps/api/tests/test_migrations.py::test_schema_v0_has_all_three_tables -x` | ❌ Wave 1 | ⬜ pending |
+| 3-01-01 | 01 | 1 | STORE-01 / STORE-02 | T-03-Mig | Migrations idempotent + pragmas applied | unit | `uv run pytest apps/api/tests/test_migrations.py::test_schema_v0_has_all_four_tables -x` | ❌ Wave 1 | ⬜ pending |
 | 3-01-02 | 01 | 1 | STORE-03 | T-03-Mig | Migration runner is forward-only, idempotent | integration | `uv run pytest apps/api/tests/test_migrations.py::test_v0_to_v1_preserves_data -x` | ❌ Wave 1 | ⬜ pending |
 | 3-01-03 | 01 | 1 | STORE-01 | — | WAL + busy_timeout + foreign_keys ON | unit | `uv run pytest apps/api/tests/test_health.py::test_pragmas_applied -x` | ❌ Wave 1 | ⬜ pending |
 | 3-02-01 | 02 | 2 | API-01 | T-03-LL | Joblib artifacts load once at lifespan | unit | `uv run pytest apps/api/tests/test_health.py::test_artifacts_loaded_once -x` | ❌ Wave 2 | ⬜ pending |
@@ -60,7 +60,7 @@ created: 2026-05-15
 | 3-04-06 | 04 | 4 | API-02 | — | override_backend body field bypasses decide() | integration | `uv run pytest apps/api/tests/test_turn_streaming.py::test_override_backend -x` | ❌ Wave 4 | ⬜ pending |
 | 3-05-01 | 05 | 5 | STORE-04 | T-03-Path | Blobs ≥256 KB written by sha256 ref | unit + integration | `uv run pytest apps/api/tests/test_blobs_by_hash.py -x` | ❌ Wave 5 | ⬜ pending |
 | 3-05-02 | 05 | 5 | API-03 / STORE-04 | T-03-Path | DELETE thread unlinks blobs THEN DB cascade | integration | `uv run pytest apps/api/tests/test_threads_crud.py::test_delete_unlinks_blobs -x` | ❌ Wave 5 | ⬜ pending |
-| 3-06-01 | 06 | 6 | API-04 | T-03-Disclo | BYOK keys never in DB or log | integration | `uv run pytest apps/api/tests/test_secure_no_key_in_logs.py -x` | ❌ Wave 6 | ⬜ pending |
+| 3-06-01 | 06 | 6 | API-04 | T-03-Disclo | BYOK keys never in DB or log | integration | `uv run pytest apps/api/tests/test_secure_no_key_in_logs.py::test_secure_no_key_in_logs_after_patch_settings -x` | ❌ Wave 6 | ⬜ pending |
 | 3-06-02 | 06 | 6 | API-03 | — | Rename endpoint (defensive constants) | integration | `uv run pytest apps/api/tests/test_rename.py -x` | ❌ Wave 6 | ⬜ pending |
 | 3-06-03 | 06 | 6 | — | — | uvicorn boots in <3 s (boot-smoke) | smoke | `time uv run python -c "from apps.api.main import app; print('ok')"` | ❌ Wave 6 | ⬜ pending |
 

@@ -1092,14 +1092,18 @@ def write_settings_file(settings: dict, target: Path) -> None:
 
 **If user confirms A1 by allowing range expansion `sse-starlette>=2.1,<4.0`:** Open Question 1 closes, A1 becomes verified.
 
-## Open Questions
+## Open Questions (RESOLVED)
+
+> All five open questions resolved before planning concluded. Plans 03-00 through 03-06 reflect these decisions.
 
 ### Open Question 1 — sse-starlette version range
+**RESOLVED:** widen to `sse-starlette>=2.1,<4.0` — locked in Plan 03-00 Task 1 (pyproject.toml dep range).
 **What we know:** CONTEXT D-06 locks `sse-starlette>=2.1,<3.0`. The latest 2.x is 2.4.1 (July 2025). The current 3.x line (3.4.4 as of May 2026) is already in the developer's venv as a transitive of `mcp`. The 2.x→3.x changes (per README + PyPI history) are internal test-isolation improvements and a `shutdown_event` knob — the public `EventSourceResponse(content, ping=15)` + `request.is_disconnected()` + `ServerSentEvent(event=, data=)` surface that Phase 3 uses is unchanged.
 **What's unclear:** Does the CONTEXT-locked `<3.0` upper bound reflect a real compatibility constraint (someone tested 3.x and saw a break), or a snapshot taken before 3.0 shipped?
 **Recommendation:** Planner SHOULD widen the dep range to `sse-starlette>=2.1,<4.0` in `pyproject.toml`. Rationale: (a) the API surface we use is identical, (b) the venv already has 3.x via mcp so `<3.0` would force a downgrade that breaks mcp, (c) 3.x has the better test-isolation improvements that benefit Phase 3 tests. If the user pushes back, the alternative is to pin `sse-starlette==2.4.1` and remove mcp (a worse trade). Document the widening in the plan's deviation note.
 
 ### Open Question 2 — `schema_v1.sql` evolution choice
+**RESOLVED:** option (b) `CREATE INDEX idx_messages_thread_id_created_at ON messages(thread_id, created_at)` — locked in Plan 03-01 Task 1 (schema_v1.sql).
 **What we know:** STORE-03 requires a v0 → v1 migration test (success criterion #5). `schema_v0.sql` is fully specified by D-13. CONTEXT canonical refs line 253 says "the planner picks the first non-trivial schema evolution; e.g., adding an index or a new column referenced by Phase 5".
 **What's unclear:** WHICH evolution? Options:
 - (a) **Add a per-thread `pinned BOOLEAN DEFAULT 0` column** — Phase 5 UI-02 could surface this. Pure ALTER TABLE ADD COLUMN; safe in all SQLite versions.
@@ -1108,16 +1112,19 @@ def write_settings_file(settings: dict, target: Path) -> None:
 **Recommendation:** (b). Adding an index is the cheapest, most defensible evolution that DOES affect query plans (so the migration test can verify both row preservation AND that the index exists post-migration). Option (c) couples Phase 3 to Phase 5 unnecessarily; option (a) is too trivial to be a useful migration test target. Planner has discretion; document the choice in the plan.
 
 ### Open Question 3 — Single shared connection vs. per-request connection
+**RESOLVED:** single shared `aiosqlite.Connection` held at `app.state.db` — locked in Plan 03-02 Task 2 (lifespan).
 **What we know:** D-01 says raw aiosqlite, but does NOT explicitly mandate single-vs-pool. WAL + busy_timeout=5000 (D-03) tolerates concurrent connections gracefully. Single-user local server has near-zero concurrency.
 **What's unclear:** Should `app.state.db` be a single shared `aiosqlite.Connection` (simpler, but serializes all writes within the connection's worker thread), or should each request open its own (more isolation, but adds connection-open overhead and per-connection pragma re-application)?
 **Recommendation:** **Single shared connection**. Single-user local server, SQLite WAL allows concurrent readers without blocking writers, single connection's worker thread serializes writes safely. Saves us from re-running pragmas on every request and avoids contention on `chat.db-shm`. The alternative (per-request) buys nothing in v1. Document explicitly in `connect.py` docstring so a future contributor doesn't change it casually.
 
 ### Open Question 4 — `routing_decisions.jsonl` write timing under high parallelism
+**RESOLVED:** plain `open(path, "a")` per line; POSIX append-atomic for <4 KB lines — locked in Plan 03-04 Task 1 (jsonl_log.py).
 **What we know:** D-05 appends one line per turn at decide-time. Single-user local server, but a developer could fire two turns concurrently via the test harness or a debug script.
 **What's unclear:** Do we need file-locking? `pathlib.Path.write_text(mode="a")` opens-appends-closes; on POSIX, append writes are atomic up to PIPE_BUF (~4 KB). Most routing-decision lines will be < 4 KB.
 **Recommendation:** Use plain `open(path, "a")` write per line; POSIX append-atomic guarantee covers our line sizes. Document the 4 KB threshold in the writer's docstring; if a future feature adds large `signals` payloads (e.g. embedding vectors), revisit. Risk: very low; mitigation: a sanity test that fires 10 concurrent turns and asserts 10 lines in the JSONL.
 
 ### Open Question 5 — Healthz schema_version read on every request
+**RESOLVED:** cache on `app.state.schema_version` at lifespan; never re-read during request handling — locked in Plan 03-02 Task 2 (lifespan + routes/health.py).
 **What we know:** D-18's healthz response includes `"schema_version": 1`. Lifespan reads it once at startup.
 **What's unclear:** Re-read on every healthz request (1 SELECT, ~50 µs), or cache on `app.state.schema_version`?
 **Recommendation:** Cache on `app.state.schema_version` at lifespan; re-read NEVER during request handling. Migrations happen ONLY at lifespan (the only writer of `schema_meta`), so the cached value is correct for the lifetime of the process. Saves a query per healthz call from Phase 5's status-dot UI polling.
@@ -1148,7 +1155,7 @@ def write_settings_file(settings: dict, target: Path) -> None:
 | API-07 | `decide()` wrapped in `asyncio.to_thread` (no event-loop block) | unit | `pytest apps/api/tests/test_turn_streaming.py::test_decide_runs_in_thread -x` | ❌ Wave 4 (new; asserts asyncio.to_thread call via monkeypatch) |
 | API-08 | Integration tests use httpx.AsyncClient + ASGITransport (NOT TestClient) | meta | `! grep -r 'TestClient' apps/api/tests/` (negative grep) | ❌ Wave 0 (new; add CI step) |
 | STORE-01 | aiosqlite 0.20+, WAL, busy_timeout=5000 on first connect | unit | `pytest apps/api/tests/test_health.py::test_pragmas_applied -x` | ❌ Wave 1 (new) |
-| STORE-02 | Three-table schema (threads / messages / routing_decisions) | unit | `pytest apps/api/tests/test_migrations.py::test_schema_v0_has_all_three_tables -x` | ❌ Wave 1 (new) |
+| STORE-02 | Four-table schema (threads / messages / routing_decisions / schema_meta) | unit | `pytest apps/api/tests/test_migrations.py::test_schema_v0_has_all_four_tables -x` | ❌ Wave 1 (new) |
 | STORE-03 | Migration v0 → v1 without data loss | integration | `pytest apps/api/tests/test_migrations.py::test_v0_to_v1_preserves_data -x` | ❌ Wave 1 (new; uses fixtures/schema_v0_seed.sql) |
 | STORE-04 | Blobs ≥256 KB written to `~/.prompt-optimizer/blobs/<sha256>` | unit + integration | `pytest apps/api/tests/test_blobs_by_hash.py -x` | ❌ Wave 5 (new) |
 | STORE-05 | One transaction per turn on Done (no per-chunk writes) | integration | `pytest apps/api/tests/test_turn_streaming.py::test_one_transaction_per_turn -x` | ❌ Wave 4 (new; asserts DB row counts after stream completes) |
