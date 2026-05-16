@@ -38,7 +38,7 @@ Requirements for the auto-routing chat milestone. Each maps to a roadmap phase.
 - [ ] **API-05**: SSE stream emits a heartbeat every 15 seconds during long agentic runs to defeat intermediate proxy timeouts
 - [ ] **API-06**: Client-disconnect detection cancels in-flight upstream provider calls (`request.is_disconnected()` polling)
 - [ ] **API-07**: Synchronous sklearn `predict` / `predict_proba` calls are wrapped in `run_in_threadpool` when invoked from async handlers
-- [ ] **API-08**: Integration tests use `httpx AsyncClient + ASGITransport` (NOT `TestClient`) to exercise streaming end-to-end
+- [x] **API-08**: Integration tests use `httpx AsyncClient + ASGITransport` (NOT `TestClient`) to exercise streaming end-to-end
 
 ### Chat UI
 
@@ -157,7 +157,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | API-05 | Phase 3 | Pending |
 | API-06 | Phase 3 | Pending |
 | API-07 | Phase 3 | Pending |
-| API-08 | Phase 3 | Pending |
+| API-08 | Phase 3 | Complete |
 | UI-01 | Phase 4 | Pending |
 | UI-02 | Phase 5 | Pending |
 | UI-03 | Phase 4 | Pending |

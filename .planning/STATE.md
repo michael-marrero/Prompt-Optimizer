@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Phase 3 context gathered
-last_updated: "2026-05-16T01:53:14.515Z"
-last_activity: 2026-05-16 -- Phase 03 planning complete
+stopped_at: Completed 03-00-PLAN.md (Wave 0 scaffolding)
+last_updated: "2026-05-16T17:57:31.338Z"
+last_activity: 2026-05-16
 progress:
   total_phases: 6
   completed_phases: 2
   total_plans: 23
-  completed_plans: 16
-  percent: 70
+  completed_plans: 17
+  percent: 74
 ---
 
 # Project State
@@ -21,16 +21,16 @@ progress:
 See: .planning/PROJECT.md (updated 2026-05-11)
 
 **Core value:** Every prompt routes to the LLM or agent best suited to deliver a high-quality answer, with no manual model selection from the user.
-**Current focus:** Phase 02 — backend-adapters-chatchunk-contract
+**Current focus:** Phase 03 — fastapi-service-persistent-storage
 
 ## Current Position
 
-Phase: 3
-Plan: Not started
+Phase: 03 (fastapi-service-persistent-storage) — EXECUTING
+Plan: 2 of 7
 Status: Ready to execute
-Last activity: 2026-05-16 -- Phase 03 planning complete
+Last activity: 2026-05-16
 
-Progress: [██████████] 100%
+Progress: [███████░░░] 74%
 
 ## Performance Metrics
 
@@ -74,6 +74,7 @@ Progress: [██████████] 100%
 | Phase 02 P05 | 5 | 1 tasks | 3 files |
 | Phase 02 P06 | 5 | 1 tasks | 2 files |
 | Phase 02 P07 | 3 | 1 tasks | 5 files |
+| Phase 03 P00 | 12 | 5 tasks | 11 files |
 
 ## Accumulated Context
 
@@ -138,6 +139,10 @@ Recent decisions affecting current work:
 - [Phase ?]: Phase 2 Plan 06 (gap closure CR-02): ComputerUseCostTracker.record_iteration_usage uses override semantics (=) for _tokens_in/_tokens_out matching its docstring and the parallel OpenRouter/Claude Code trackers; cache counters (_cache_read_total/_cache_write_total) PRESERVED as += because they are visibility-only running totals across iterations.
 - [Phase ?]: Phase 2 Plan 06: TDD RED gate landed first (commit 43b40ab) — regression test test_record_iteration_usage_overrides_running_estimate asserts tokens_out() == 5 after text='x'*40 + record_iteration_usage(input_tokens=10, output_tokens=5). RED commit showed 'assert 15 == 5'. GREEN landed in commit a95617a.
 - [Phase 02]: Phase 2 Plan 07 (gap closure CR-04 + CR-05): SECRET_PATTERNS reordered with Bearer pattern FIRST so canonical Authorization: Bearer sk-... headers consume as a single Bearer ***REDACTED*** unit; scripts/no-secrets.sh regex set unified with logging_filter alphabets (sk- gains _-, Bearer gains [[:space:]]+); parity test test_logging_filter_and_no_secrets_regex_parity + dedicated CI step prevent future drift. Manual paste tests for sk-AAAAA_AAAA... and Bearer<tab><token> now BLOCK at staging time (previously slipped through). 9/9 logging_filter tests pass; 133 Phase 2 tests pass (was 131; +2 new).
+- [Phase ?]: [Phase 03]: Phase 3 Plan 00 (Wave 0): sse-starlette upper bound widened to >=2.1,<4.0 per RESEARCH OQ1; CONTEXT D-06 originally locked <3.0 but mcp transitive pins 3.x and public Phase 3 surface is unchanged between 2.x/3.x.
+- [Phase ?]: [Phase 03]: Phase 3 Plan 00 (Wave 0): test_smoke.py negative-grep guard builds its forbidden regex at runtime from string fragments to avoid source-file self-match; subprocess grep uses --include='*.py' --include='*.sql' to skip .pyc files. conftest.py docstrings reference 'the synchronous FastAPI test-client wrapper' by description rather than literal name to keep the CLI guard clean (Rule 1 fix).
+- [Phase ?]: [Phase 03]: Phase 3 Plan 00 (Wave 0): apps/api/paths.py uses Path(__file__).resolve().parents[2] same as apps/api/__init__.py so PROJECT_ROOT is interchangeable. PROMPT_OPTIMIZER_HOME env override read at import time; tests monkeypatch + importlib.reload to flip.
+- [Phase ?]: [Phase 03]: Phase 3 Plan 00 (Wave 0): apps/api/tests/conftest.py uses B3 lazy-import pattern (try/except ImportError -> pytest.skip) for every Wave 1-6 producer module (apps.api.main, apps.api.lifespan, apps.api.db.connect, apps.api.db.migrate) so the conftest is collectable in Wave 0 before those modules exist.
 
 ### Pending Todos
 
@@ -160,6 +165,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-05-16T00:29:31.972Z
-Stopped at: Phase 3 context gathered
-Resume file: .planning/phases/03-fastapi-service-persistent-storage/03-CONTEXT.md
+Last session: 2026-05-16T17:57:31.330Z
+Stopped at: Completed 03-00-PLAN.md (Wave 0 scaffolding)
+Resume file: None

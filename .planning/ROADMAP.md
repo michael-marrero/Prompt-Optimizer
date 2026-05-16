@@ -75,7 +75,7 @@ Decimal phases appear between their surrounding integers in numeric order.
   5. A schema-migration test upgrades a v0 DB (created from the initial `schema.sql`) to v1 using the chosen migration tool (Alembic or yoyo) without data loss; CORS middleware is configured with the explicit Next.js dev-server origin (no `allow_origins=["*"]`); BYOK keys submitted via `PATCH /settings` never appear in the DB or in any log line (regression test).
 
 **Plans**: 7 plans
-- [ ] 03-00-PLAN.md — Wave 0: Scaffolding (pyproject.toml deps, apps/api/paths.py, test fixtures, schema_v0_seed.sql, API-08 negative-grep guard) — API-08
+- [x] 03-00-PLAN.md — Wave 0: Scaffolding (pyproject.toml deps, apps/api/paths.py, test fixtures, schema_v0_seed.sql, API-08 negative-grep guard) — API-08
 - [ ] 03-01-PLAN.md — Wave 1: Storage layer (aiosqlite open_db with D-03 pragmas, schema_v0.sql, schema_v1.sql index, migration runner, Pydantic models, ~11 typed async queries) — STORE-01, STORE-02, STORE-03
 - [ ] 03-02-PLAN.md — Wave 2: App shell + healthz + CORS (lifespan, main.py with CORSMiddleware explicit origin, settings.py D-12 STRICT AND, GET /healthz D-18 status dots) — API-01, OSS-05
 - [ ] 03-03-PLAN.md — Wave 3: Thread CRUD + settings (POST/GET/PATCH/DELETE /threads + GET masked / PATCH merge-patch /settings with adapter cache invalidation) — API-03
