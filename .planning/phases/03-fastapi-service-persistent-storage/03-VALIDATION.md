@@ -1,9 +1,9 @@
 ---
 phase: 03
 slug: fastapi-service-persistent-storage
-status: draft
-nyquist_compliant: false
-wave_0_complete: false
+status: signed
+nyquist_compliant: true
+wave_0_complete: true
 created: 2026-05-15
 ---
 
@@ -42,8 +42,8 @@ created: 2026-05-15
 
 | Task ID | Plan | Wave | Requirement | Threat Ref | Secure Behavior | Test Type | Automated Command | File Exists | Status |
 |---------|------|------|-------------|------------|-----------------|-----------|-------------------|-------------|--------|
-| 3-00-01 | 00 | 0 | API-08 | — | Enforce httpx + ASGITransport (no TestClient) | meta | `! grep -rE 'from fastapi.testclient\|fastapi\.testclient\.TestClient' apps/api/tests/` | ❌ Wave 0 | ⬜ pending |
-| 3-00-02 | 00 | 0 | API-01 / STORE-01 / STORE-02 | — | conftest fixtures load before app startup | unit | `uv run pytest apps/api/tests/test_smoke.py -x` (Wave 0 sanity) | ❌ Wave 0 | ⬜ pending |
+| 3-00-01 | 00 | 0 | API-08 | — | Enforce httpx + ASGITransport (no TestClient) | meta | `! grep -rE 'from fastapi.testclient\|fastapi\.testclient\.TestClient' apps/api/tests/` | ✅ landed | ✅ green |
+| 3-00-02 | 00 | 0 | API-01 / STORE-01 / STORE-02 | — | conftest fixtures load before app startup | unit | `uv run pytest apps/api/tests/test_smoke.py -x` (Wave 0 sanity) | ✅ landed | ✅ green |
 | 3-01-01 | 01 | 1 | STORE-01 / STORE-02 | T-03-Mig | Migrations idempotent + pragmas applied | unit | `uv run pytest apps/api/tests/test_migrations.py::test_schema_v0_has_all_four_tables -x` | ❌ Wave 1 | ⬜ pending |
 | 3-01-02 | 01 | 1 | STORE-03 | T-03-Mig | Migration runner is forward-only, idempotent | integration | `uv run pytest apps/api/tests/test_migrations.py::test_v0_to_v1_preserves_data -x` | ❌ Wave 1 | ⬜ pending |
 | 3-01-03 | 01 | 1 | STORE-01 | — | WAL + busy_timeout + foreign_keys ON | unit | `uv run pytest apps/api/tests/test_health.py::test_pragmas_applied -x` | ❌ Wave 1 | ⬜ pending |
@@ -108,11 +108,11 @@ created: 2026-05-15
 
 ## Validation Sign-Off
 
-- [ ] All tasks have `<automated>` verify or Wave 0 dependencies
-- [ ] Sampling continuity: no 3 consecutive tasks without automated verify
-- [ ] Wave 0 covers all MISSING references (Phase 3 tests + fixtures + fake adapter)
-- [ ] No watch-mode flags (`-x --timeout=N` is the canonical form)
-- [ ] Feedback latency < 60 s
-- [ ] `nyquist_compliant: true` set in frontmatter after Wave 0 lands
+- [x] All tasks have `<automated>` verify or Wave 0 dependencies
+- [x] Sampling continuity: no 3 consecutive tasks without automated verify
+- [x] Wave 0 covers all MISSING references (Phase 3 tests + fixtures + fake adapter)
+- [x] No watch-mode flags (`-x --timeout=N` is the canonical form)
+- [x] Feedback latency < 60 s
+- [x] `nyquist_compliant: true` set in frontmatter after Wave 0 lands
 
-**Approval:** pending
+**Approval:** signed — 2026-05-16
