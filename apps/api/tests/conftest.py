@@ -15,8 +15,8 @@ This conftest authors three core fixtures that Waves 1-6 reuse:
                             ``httpx.AsyncClient(transport=
                             httpx.ASGITransport(app=app),
                             base_url="http://test")``. **API-08 /
-                            D-20:** NEVER uses
-                            ``fastapi.testclient.TestClient``; the
+                            D-20:** NEVER uses the synchronous
+                            FastAPI test-client wrapper; the
                             negative-grep guard in CI enforces this.
 
     app_factory             synchronous factory fixture — returns a
@@ -140,9 +140,9 @@ async def asgi_client(request):
     the server task in an indeterminate state.
 
     **API-08 / D-20:** This fixture deliberately uses
-    ``httpx.AsyncClient + httpx.ASGITransport``. NEVER
-    ``fastapi.testclient.TestClient`` — the negative-grep guard in CI
-    blocks ``from fastapi.testclient`` anywhere under
+    ``httpx.AsyncClient + httpx.ASGITransport``. NEVER the
+    synchronous FastAPI test-client wrapper — the negative-grep
+    guard in CI blocks that import path anywhere under
     ``apps/api/tests/``.
     """
 
