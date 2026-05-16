@@ -31,5 +31,8 @@ chat.db
 # macOS
 .DS_Store
 
+# Phase 3 - routing-decisions JSONL log (STORE-06; written at decide-time)
+.planning/data/
+
 # Already-committed paths to LEAVE alone
 # (this file does NOT exclude data_processed/, models/, evaluation/ — those are LFS-tracked)
