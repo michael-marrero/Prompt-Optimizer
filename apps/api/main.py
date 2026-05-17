@@ -118,11 +118,12 @@ def create_app() -> FastAPI:
     # inside the factory (not at module top) to avoid a circular-
     # import surface area if a future route ever pulls from
     # ``apps.api.main``.
-    from apps.api.routes import health, settings, threads
+    from apps.api.routes import health, settings, threads, turn
 
     app.include_router(health.router)
     app.include_router(threads.router)
     app.include_router(settings.router)
+    app.include_router(turn.router)
 
     return app
 
