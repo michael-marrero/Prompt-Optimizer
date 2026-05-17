@@ -32,12 +32,12 @@ Requirements for the auto-routing chat milestone. Each maps to a roadmap phase.
 ### FastAPI Service Layer
 
 - [x] **API-01**: FastAPI process loads all joblib artifacts once at `lifespan` startup; never reloaded per request
-- [ ] **API-02**: `POST /threads/{thread_id}/turn` runs routing decision → dispatches adapter → streams `ChatChunk`s back via `fastapi.sse.EventSourceResponse`
+- [x] **API-02**: `POST /threads/{thread_id}/turn` runs routing decision → dispatches adapter → streams `ChatChunk`s back via `fastapi.sse.EventSourceResponse`
 - [x] **API-03**: Thread CRUD endpoints (`POST /threads`, `GET /threads`, `GET /threads/{id}`, `PATCH /threads/{id}`, `DELETE /threads/{id}`)
 - [ ] **API-04**: BYOK settings endpoint accepts per-backend keys; keys held in-process only, never persisted to SQLite or logs
-- [ ] **API-05**: SSE stream emits a heartbeat every 15 seconds during long agentic runs to defeat intermediate proxy timeouts
-- [ ] **API-06**: Client-disconnect detection cancels in-flight upstream provider calls (`request.is_disconnected()` polling)
-- [ ] **API-07**: Synchronous sklearn `predict` / `predict_proba` calls are wrapped in `run_in_threadpool` when invoked from async handlers
+- [x] **API-05**: SSE stream emits a heartbeat every 15 seconds during long agentic runs to defeat intermediate proxy timeouts
+- [x] **API-06**: Client-disconnect detection cancels in-flight upstream provider calls (`request.is_disconnected()` polling)
+- [x] **API-07**: Synchronous sklearn `predict` / `predict_proba` calls are wrapped in `run_in_threadpool` when invoked from async handlers
 - [x] **API-08**: Integration tests use `httpx AsyncClient + ASGITransport` (NOT `TestClient`) to exercise streaming end-to-end
 
 ### Chat UI
@@ -66,8 +66,8 @@ Requirements for the auto-routing chat milestone. Each maps to a roadmap phase.
 - [x] **STORE-02**: Schema: `threads(id, title, created_at, updated_at)`, `messages(id, thread_id, role, content_blocks JSON, backend_used, model_used, cost_usd, latency_ms, tokens_in, tokens_out, created_at)`, `routing_decisions(id, message_id, task_type, task_confidence, agentic_intent, agentic_confidence, predicted_model, rationale, decided_at)`
 - [x] **STORE-03**: Schema migrations managed from day one (Alembic or SQLModel-native); never break existing user DBs across releases
 - [ ] **STORE-04**: Large blobs (screenshots ≥256 KB, large diffs) written to disk and referenced by content hash from the DB row
-- [ ] **STORE-05**: Assistant message persisted once on `Done` chunk (buffered in memory during stream); no per-chunk writes
-- [ ] **STORE-06**: Every routing decision appended to a local `.planning/data/routing_decisions.jsonl` log file alongside the DB row, for offline analysis
+- [x] **STORE-05**: Assistant message persisted once on `Done` chunk (buffered in memory during stream); no per-chunk writes
+- [x] **STORE-06**: Every routing decision appended to a local `.planning/data/routing_decisions.jsonl` log file alongside the DB row, for offline analysis
 
 ### Security & Cost Guards
 
@@ -151,12 +151,12 @@ Which phases cover which requirements. Updated during roadmap creation.
 | BACKEND-08 | Phase 2 | Complete |
 | BACKEND-09 | Phase 2 | Complete |
 | API-01 | Phase 3 | Complete |
-| API-02 | Phase 3 | Pending |
+| API-02 | Phase 3 | Complete |
 | API-03 | Phase 3 | Complete |
 | API-04 | Phase 3 | Pending |
-| API-05 | Phase 3 | Pending |
-| API-06 | Phase 3 | Pending |
-| API-07 | Phase 3 | Pending |
+| API-05 | Phase 3 | Complete |
+| API-06 | Phase 3 | Complete |
+| API-07 | Phase 3 | Complete |
 | API-08 | Phase 3 | Complete |
 | UI-01 | Phase 4 | Pending |
 | UI-02 | Phase 5 | Pending |
@@ -179,8 +179,8 @@ Which phases cover which requirements. Updated during roadmap creation.
 | STORE-02 | Phase 3 | Complete |
 | STORE-03 | Phase 3 | Complete |
 | STORE-04 | Phase 3 | Pending |
-| STORE-05 | Phase 3 | Pending |
-| STORE-06 | Phase 3 | Pending |
+| STORE-05 | Phase 3 | Complete |
+| STORE-06 | Phase 3 | Complete |
 | SECURE-01 | Phase 2 | Complete |
 | SECURE-02 | Phase 2 | Complete |
 | SECURE-03 | Phase 1 | Complete |

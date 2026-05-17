@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 03-03-PLAN.md (Wave 3 thread CRUD + settings)
-last_updated: "2026-05-17T16:03:37.348Z"
+stopped_at: Completed 03-04-PLAN.md (Wave 4 SSE turn handler — HEART of Phase 3)
+last_updated: "2026-05-17T17:53:07.198Z"
 last_activity: 2026-05-17
 progress:
   total_phases: 6
   completed_phases: 2
   total_plans: 23
-  completed_plans: 20
-  percent: 87
+  completed_plans: 21
+  percent: 91
 ---
 
 # Project State
@@ -26,11 +26,11 @@ See: .planning/PROJECT.md (updated 2026-05-11)
 ## Current Position
 
 Phase: 03 (fastapi-service-persistent-storage) — EXECUTING
-Plan: 5 of 7
+Plan: 6 of 7
 Status: Ready to execute
 Last activity: 2026-05-17
 
-Progress: [█████████░] 87%
+Progress: [█████████░] 91%
 
 ## Performance Metrics
 
@@ -78,6 +78,7 @@ Progress: [█████████░] 87%
 | Phase 03 P01 | 21 | 3 tasks | 8 files |
 | Phase 03 P02 | 1h 9m | 3 tasks | 7 files |
 | Phase 03 P03 | 38m | 3 tasks | 5 files |
+| Phase 03 P04 | 102m 51s | 3 tasks | 4 files |
 
 ## Accumulated Context
 
@@ -156,6 +157,10 @@ Recent decisions affecting current work:
 - [Phase 03]: D-18 read-only healthz precheck — KeyStore.get + computer_use_enabled() consults only; NEVER constructs an adapter (verified by test_healthz_never_constructs_adapters)
 - [Phase ?]: [Phase 03]: Phase 3 Plan 03 (Wave 3): Pydantic v2 JSON Merge Patch via body.model_dump(exclude_unset=True) is the canonical differentiator between 'field omitted' and 'field set to None' — Pitfall 7 None-as-delete on KeyPatch. Plaintext keys are write-only on the wire (D-10/SECURE-04); PATCH response and GET response NEVER carry them — sk-or-…ABC masked form. D-15 cache invalidation (app.state.adapters.clear()) runs AFTER atomic file write and BEFORE response build.
 - [Phase ?]: [Phase 03]: Phase 3 Plan 03 (Wave 3) Rule 3: test_settings.py::_fresh_app reload chain extended (paths → settings → routes.settings → lifespan → main) — discovered when write_settings_file targeted the user's real home; module-cached SETTINGS_PATH survives sibling-module reload, so dependents must also reload to pick up tmp_path.
+- [Phase ?]: [Phase 03]: Phase 3 Plan 04 (Wave 4) Rule 1: SSE endpoint requires response_model=None on @router.post decorator — FastAPI tries to generate a Pydantic response model from EventSourceResponse return-type annotation and aborts at app construction. response_model=None is the documented escape valve for non-Pydantic responses.
+- [Phase ?]: [Phase 03]: Phase 3 Plan 04 (Wave 4) Rule 1: _fresh_app test helper purges sse_starlette from sys.modules before reloading apps.api.routes.turn — Phase 1 D-18 smoke test deletes starlette/fastapi/pydantic/httpx, leaving turn.py's cached EventSourceResponse class inheriting from a STALE starlette.responses.Response while freshly-reimported FastAPI compares against the NEW class — isinstance() fails and FastAPI falls through to jsonable_encoder. Test-only Rule 1 workaround; production unchanged.
+- [Phase ?]: [Phase 03]: Phase 3 Plan 04 (Wave 4): sse_starlette 3.4.4 does NOT export DEFAULT_PING_INTERVAL as module-level (CLASS attribute on EventSourceResponse). Tests use FastPingResponse subclass overriding DEFAULT_PING_INTERVAL=0.3 AND forcing ping=0.3 in __init__ — both paths needed because production passes ping=15 which wins over the class default when non-None.
+- [Phase ?]: [Phase 03]: Phase 3 Plan 04 (Wave 4): cancellation budget enforced via time.monotonic() inline assertion (elapsed < 2.0) per CONTEXT critical context; @pytest.mark.timeout(5) is belt-and-suspenders. 9 tests pass in 4.5s; whole-repo 276 passed / 2 skipped / 3 deselected in both apps/ src/ and src/ apps/ orderings.
 
 ### Pending Todos
 
@@ -178,6 +183,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-05-17T16:03:37.340Z
-Stopped at: Completed 03-03-PLAN.md (Wave 3 thread CRUD + settings)
+Last session: 2026-05-17T17:53:07.141Z
+Stopped at: Completed 03-04-PLAN.md (Wave 4 SSE turn handler — HEART of Phase 3)
 Resume file: None
