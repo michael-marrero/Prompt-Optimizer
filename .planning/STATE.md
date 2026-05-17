@@ -4,14 +4,14 @@ milestone: v1.0
 milestone_name: milestone
 status: executing
 stopped_at: Completed 03-01-PLAN.md (Wave 1 storage layer)
-last_updated: "2026-05-16T18:54:14.095Z"
-last_activity: 2026-05-16
+last_updated: "2026-05-17T01:15:06.313Z"
+last_activity: 2026-05-17
 progress:
   total_phases: 6
   completed_phases: 2
   total_plans: 23
-  completed_plans: 18
-  percent: 78
+  completed_plans: 19
+  percent: 83
 ---
 
 # Project State
@@ -26,11 +26,11 @@ See: .planning/PROJECT.md (updated 2026-05-11)
 ## Current Position
 
 Phase: 03 (fastapi-service-persistent-storage) — EXECUTING
-Plan: 3 of 7
+Plan: 4 of 7
 Status: Ready to execute
-Last activity: 2026-05-16
+Last activity: 2026-05-17
 
-Progress: [████████░░] 78%
+Progress: [████████░░] 83%
 
 ## Performance Metrics
 
@@ -76,6 +76,7 @@ Progress: [████████░░] 78%
 | Phase 02 P07 | 3 | 1 tasks | 5 files |
 | Phase 03 P00 | 12 | 5 tasks | 11 files |
 | Phase 03 P01 | 21 | 3 tasks | 8 files |
+| Phase 03 P02 | 1h 9m | 3 tasks | 7 files |
 
 ## Accumulated Context
 
@@ -147,6 +148,11 @@ Recent decisions affecting current work:
 - [Phase ?]: [Phase 03]: Phase 3 Plan 01 (Wave 1): RESEARCH Open Question 2 resolved as option (b) — schema_v1.sql is CREATE INDEX idx_messages_thread_id_created_at ON messages(thread_id, created_at). Option (a) pinned BOOLEAN rejected (too trivial); option (c) routing_feedback table rejected (Phase 3↔5 coupling).
 - [Phase ?]: [Phase 03]: Phase 3 Plan 01 (Wave 1) Rule 1 deviation: migrate runner's INSERT-vs-UPDATE choice for schema_meta cannot use the captured _current_version() result — schema_v0.sql itself seeds version 0 inside executescript(), so the post-script row count must be re-read. Fix: SELECT COUNT(*) FROM schema_meta after executescript and choose INSERT only when meta_count == 0. Test test_up_to_latest_idempotent enforces single-row invariant.
 - [Phase ?]: [Phase 03]: Phase 3 Plan 01 (Wave 1): queries.py duck-types the in-flight RoutingDecision via getattr(decision, ...) + signals_dict.get(...). apps.api.db.* never imports from src.routing.*; the Wave 4 turn route handler is the single import edge. Preserves Phase 1 D-18 import-graph guard when src/routing/ is tested in isolation.
+- [Phase 03]: Open Question 3: single shared aiosqlite.Connection at app.state.db — Lifespan opens once; WAL + busy_timeout=5000 tolerates concurrent reads; saves re-running pragmas per request
+- [Phase 03]: Open Question 5: schema_version cached at lifespan startup — Never re-read per request; reduces hot-path SQLite hits from Phase 5 UI-11 status polling
+- [Phase 03]: Lifespan loader = src.routing.decide._load_default_artifacts — Canonical 4-key dict (task_type_classifier, agentic_intent_classifier, model_router, model_mapping) that decide() consumes verbatim; NOT src.demo.demo_router.load_joblib_artifacts (single-artifact wrong shape)
+- [Phase 03]: D-12 STRICT AND-semantics for computer-use opt-in — computer_use_enabled() requires env var literal '1' AND in-app settings flag True; Phase 2 single-gate adapter check is EXTENDED, not replaced
+- [Phase 03]: D-18 read-only healthz precheck — KeyStore.get + computer_use_enabled() consults only; NEVER constructs an adapter (verified by test_healthz_never_constructs_adapters)
 
 ### Pending Todos
 
@@ -169,6 +175,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-05-16T18:54:14.087Z
+Last session: 2026-05-17T01:09:10.403Z
 Stopped at: Completed 03-01-PLAN.md (Wave 1 storage layer)
 Resume file: None

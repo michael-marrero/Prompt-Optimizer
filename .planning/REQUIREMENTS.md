@@ -31,7 +31,7 @@ Requirements for the auto-routing chat milestone. Each maps to a roadmap phase.
 
 ### FastAPI Service Layer
 
-- [ ] **API-01**: FastAPI process loads all joblib artifacts once at `lifespan` startup; never reloaded per request
+- [x] **API-01**: FastAPI process loads all joblib artifacts once at `lifespan` startup; never reloaded per request
 - [ ] **API-02**: `POST /threads/{thread_id}/turn` runs routing decision → dispatches adapter → streams `ChatChunk`s back via `fastapi.sse.EventSourceResponse`
 - [ ] **API-03**: Thread CRUD endpoints (`POST /threads`, `GET /threads`, `GET /threads/{id}`, `PATCH /threads/{id}`, `DELETE /threads/{id}`)
 - [ ] **API-04**: BYOK settings endpoint accepts per-backend keys; keys held in-process only, never persisted to SQLite or logs
@@ -84,7 +84,7 @@ Requirements for the auto-routing chat milestone. Each maps to a roadmap phase.
 - [ ] **OSS-02**: `make setup` (or `scripts/setup.sh`) runs `git lfs pull`, downloads NLTK `punkt_tab`, pre-fetches the SentenceTransformer model, and copies `.env.example` → `.env` if absent
 - [ ] **OSS-03**: `.env.example` enumerates every key the app reads with one-line comments
 - [ ] **OSS-04**: README rewritten — three golden-path demo prompts ("build me a finance app" → Claude Code; "what's the capital of France?" → cheap chat model; "open this URL and check the price" → computer-use), screenshots, quickstart that works from a clean clone
-- [ ] **OSS-05**: CORS configured explicitly between Next.js dev server and FastAPI; no `allow_origins=["*"]`
+- [x] **OSS-05**: CORS configured explicitly between Next.js dev server and FastAPI; no `allow_origins=["*"]`
 - [x] **OSS-06**: CI smoke test asserts `from claude_agent_sdk import ClaudeAgentOptions` to catch any regression to the deprecated `claude-code-sdk`
 - [ ] **OSS-07**: Playwright E2E test exercises the full SSE pipe (browser → Next.js → FastAPI → OpenRouter → SSE back) to catch AI SDK v5 message-format drift
 - [ ] **OSS-08**: Fresh-clone manual UAT — a contributor on a clean machine reaches the first streamed response in under 10 minutes following only the README
@@ -150,7 +150,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | BACKEND-07 | Phase 2 | Complete |
 | BACKEND-08 | Phase 2 | Complete |
 | BACKEND-09 | Phase 2 | Complete |
-| API-01 | Phase 3 | Pending |
+| API-01 | Phase 3 | Complete |
 | API-02 | Phase 3 | Pending |
 | API-03 | Phase 3 | Pending |
 | API-04 | Phase 3 | Pending |
@@ -191,7 +191,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | OSS-02 | Phase 6 | Pending |
 | OSS-03 | Phase 6 | Pending |
 | OSS-04 | Phase 6 | Pending |
-| OSS-05 | Phase 3 | Pending |
+| OSS-05 | Phase 3 | Complete |
 | OSS-06 | Phase 2 | Complete |
 | OSS-07 | Phase 6 | Pending |
 | OSS-08 | Phase 6 | Pending |
