@@ -55,6 +55,10 @@ from typing import Any
 
 import aiosqlite
 
+from apps.api.blobs import (
+    _collect_blob_refs_from_content_blocks,
+    _is_inside_blobs_dir,
+)
 from apps.api.db.models import Message, RoutingDecision, Thread
 
 logger = logging.getLogger(__name__)
@@ -187,16 +191,70 @@ async def update_thread_title(
 async def delete_thread(
     db: aiosqlite.Connection, thread_id: str
 ) -> bool:
-    """Delete the thread row; return True iff a row was removed.
+    """Delete a thread and cascade-unlink any referenced blob files.
 
-    Foreign-key ``ON DELETE CASCADE`` (D-13) plus
-    ``PRAGMA foreign_keys=ON`` (D-03) clean up the dependent
-    ``messages`` and ``routing_decisions`` rows atomically. Wave 5
-    will wrap this query with a pre-step that unlinks blob files
-    referenced by ``messages.content_blocks`` BEFORE this DELETE
-    fires; Wave 1 ships the minimal DB-only path.
+    Order matters (D-14):
+
+        1. SELECT ``content_blocks`` for every message in the thread.
+        2. JSON-walk each row to collect every ``image_ref`` /
+           ``diff_ref`` Path.
+        3. Path-traversal-defensively unlink each file inside
+           ``BLOBS_DIR`` (``_is_inside_blobs_dir`` guards each entry
+           — tampered DB rows pointing outside BLOBS_DIR are SKIPPED,
+           not unlinked).
+        4. THEN run ``DELETE FROM threads WHERE id = ?`` — the
+           foreign-key ``ON DELETE CASCADE`` (D-13) plus
+           ``PRAGMA foreign_keys=ON`` (D-03) clean up the dependent
+           ``messages`` and ``routing_decisions`` rows atomically.
+
+    Rationale: blobs FIRST means an interrupted delete (process killed
+    between unlink and DB delete) leaves orphan blobs (recoverable by
+    a future ``make gc-blobs``) rather than stale DB rows pointing to
+    missing files. The reverse order — DB first, blobs after — would
+    leak storage AND break the invariant that every persisted
+    ``image_ref`` resolves to a real file on disk.
+
+    Returns ``True`` iff a thread row was removed (rowcount > 0).
+    Unknown thread ids return ``False`` (idempotent).
+
+    Cross-refs:
+        - 03-CONTEXT.md D-14 (cascade unlink semantics)
+        - 03-RESEARCH.md §"Pattern 10" lines 670-671 (order rationale)
+        - 03-RESEARCH.md §"Security Domain" lines 1198-1200 (path
+          traversal defense at unlink time)
     """
 
+    # Step 1: collect every blob ref referenced by this thread's
+    # messages BEFORE we delete the rows (otherwise the cascade would
+    # nuke our source of truth for the ref paths).
+    async with db.execute(
+        "SELECT content_blocks FROM messages WHERE thread_id = ?",
+        (thread_id,),
+    ) as cur:
+        rows = await cur.fetchall()
+
+    refs_to_unlink: list = []
+    for row in rows:
+        content_blocks_json = row[0] if row else None
+        if content_blocks_json:
+            refs_to_unlink.extend(
+                _collect_blob_refs_from_content_blocks(content_blocks_json)
+            )
+
+    # Step 2: unlink each ref inside BLOBS_DIR. T-03-Path defense —
+    # any ref that resolves outside BLOBS_DIR (tampered DB row) is
+    # SKIPPED, never touched. ``missing_ok=True`` makes this safe to
+    # replay even if a prior partial delete already removed the file.
+    for ref in refs_to_unlink:
+        if _is_inside_blobs_dir(ref):
+            ref.unlink(missing_ok=True)
+        else:
+            logger.warning(
+                "skipping unlink of out-of-bounds blob ref: %s", ref
+            )
+
+    # Step 3: DB DELETE — FK CASCADE handles messages +
+    # routing_decisions in one statement.
     async with db.execute(
         "DELETE FROM threads WHERE id = ?", (thread_id,)
     ) as cur:
