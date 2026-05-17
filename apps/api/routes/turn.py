@@ -143,11 +143,13 @@ from sse_starlette.sse import EventSourceResponse, ServerSentEvent
 from apps.api.backends.chunks import (
     ChatChunk,
     Done,
+    Screenshot,
     StreamError,
 )
 from apps.api.backends.cost import DEFAULT_PER_TURN_COST_USD
 from apps.api.backends.protocol import AdapterOptions
 from apps.api.backends.protocol import Message as AdapterMessage
+from apps.api.blobs import _maybe_externalize_screenshot
 from apps.api.db.queries import (
     get_thread,
     get_thread_messages,
@@ -465,10 +467,16 @@ async def post_turn(
             async for chunk in adapter.stream(
                 body.message, adapter_history, options
             ):
-                # Wave 5 WILL wrap this generator with a Screenshot
-                # blob-externalise step (STORE-04). Wave 4 ships
-                # pass-through; Wave 5 inserts the
-                # maybe_externalize call here.
+                # STORE-04 + D-14: externalize Screenshot chunks
+                # >=256KB BEFORE buffer.append AND BEFORE the SSE yield
+                # so both the wire and the persisted content_blocks
+                # JSON see the image_ref shape. <256KB chunks pass
+                # through unchanged (return-unchanged from the
+                # transcoder). The interception lives here — the
+                # SSE generator is the only callsite per RESEARCH
+                # Pattern 10 lines 635-637.
+                if isinstance(chunk, Screenshot):
+                    chunk = _maybe_externalize_screenshot(chunk)
                 buffer.append(chunk)
                 yield ServerSentEvent(
                     event=chunk.type,
