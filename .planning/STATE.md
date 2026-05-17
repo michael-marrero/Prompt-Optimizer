@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 03-01-PLAN.md (Wave 1 storage layer)
-last_updated: "2026-05-17T01:15:06.313Z"
+stopped_at: Completed 03-03-PLAN.md (Wave 3 thread CRUD + settings)
+last_updated: "2026-05-17T16:03:37.348Z"
 last_activity: 2026-05-17
 progress:
   total_phases: 6
   completed_phases: 2
   total_plans: 23
-  completed_plans: 19
-  percent: 83
+  completed_plans: 20
+  percent: 87
 ---
 
 # Project State
@@ -26,11 +26,11 @@ See: .planning/PROJECT.md (updated 2026-05-11)
 ## Current Position
 
 Phase: 03 (fastapi-service-persistent-storage) — EXECUTING
-Plan: 4 of 7
+Plan: 5 of 7
 Status: Ready to execute
 Last activity: 2026-05-17
 
-Progress: [████████░░] 83%
+Progress: [█████████░] 87%
 
 ## Performance Metrics
 
@@ -77,6 +77,7 @@ Progress: [████████░░] 83%
 | Phase 03 P00 | 12 | 5 tasks | 11 files |
 | Phase 03 P01 | 21 | 3 tasks | 8 files |
 | Phase 03 P02 | 1h 9m | 3 tasks | 7 files |
+| Phase 03 P03 | 38m | 3 tasks | 5 files |
 
 ## Accumulated Context
 
@@ -153,6 +154,8 @@ Recent decisions affecting current work:
 - [Phase 03]: Lifespan loader = src.routing.decide._load_default_artifacts — Canonical 4-key dict (task_type_classifier, agentic_intent_classifier, model_router, model_mapping) that decide() consumes verbatim; NOT src.demo.demo_router.load_joblib_artifacts (single-artifact wrong shape)
 - [Phase 03]: D-12 STRICT AND-semantics for computer-use opt-in — computer_use_enabled() requires env var literal '1' AND in-app settings flag True; Phase 2 single-gate adapter check is EXTENDED, not replaced
 - [Phase 03]: D-18 read-only healthz precheck — KeyStore.get + computer_use_enabled() consults only; NEVER constructs an adapter (verified by test_healthz_never_constructs_adapters)
+- [Phase ?]: [Phase 03]: Phase 3 Plan 03 (Wave 3): Pydantic v2 JSON Merge Patch via body.model_dump(exclude_unset=True) is the canonical differentiator between 'field omitted' and 'field set to None' — Pitfall 7 None-as-delete on KeyPatch. Plaintext keys are write-only on the wire (D-10/SECURE-04); PATCH response and GET response NEVER carry them — sk-or-…ABC masked form. D-15 cache invalidation (app.state.adapters.clear()) runs AFTER atomic file write and BEFORE response build.
+- [Phase ?]: [Phase 03]: Phase 3 Plan 03 (Wave 3) Rule 3: test_settings.py::_fresh_app reload chain extended (paths → settings → routes.settings → lifespan → main) — discovered when write_settings_file targeted the user's real home; module-cached SETTINGS_PATH survives sibling-module reload, so dependents must also reload to pick up tmp_path.
 
 ### Pending Todos
 
@@ -175,6 +178,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-05-17T01:09:10.403Z
-Stopped at: Completed 03-01-PLAN.md (Wave 1 storage layer)
+Last session: 2026-05-17T16:03:37.340Z
+Stopped at: Completed 03-03-PLAN.md (Wave 3 thread CRUD + settings)
 Resume file: None

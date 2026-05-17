@@ -78,7 +78,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [x] 03-00-PLAN.md — Wave 0: Scaffolding (pyproject.toml deps, apps/api/paths.py, test fixtures, schema_v0_seed.sql, API-08 negative-grep guard) — API-08
 - [x] 03-01-PLAN.md — Wave 1: Storage layer (aiosqlite open_db with D-03 pragmas, schema_v0.sql, schema_v1.sql index, migration runner, Pydantic models, ~11 typed async queries) — STORE-01, STORE-02, STORE-03
 - [x] 03-02-PLAN.md — Wave 2: App shell + healthz + CORS (lifespan, main.py with CORSMiddleware explicit origin, settings.py D-12 STRICT AND, GET /healthz D-18 status dots) — API-01, OSS-05
-- [ ] 03-03-PLAN.md — Wave 3: Thread CRUD + settings (POST/GET/PATCH/DELETE /threads + GET masked / PATCH merge-patch /settings with adapter cache invalidation) — API-03
+- [x] 03-03-PLAN.md — Wave 3: Thread CRUD + settings (POST/GET/PATCH/DELETE /threads + GET masked / PATCH merge-patch /settings with adapter cache invalidation) — API-03
 - [ ] 03-04-PLAN.md — Wave 4: SSE turn handler (POST /threads/{id}/turn — the heart; asyncio.to_thread decide + EventSourceResponse ping=15 + buffer-and-persist-on-Done + jsonl log + override_backend) — API-02, API-05, API-06, API-07, STORE-05, STORE-06
 - [ ] 03-05-PLAN.md — Wave 5: Blob storage + cascade unlink (apps/api/blobs.py sha256 by-hash transcoder + delete_thread blob walk + path-traversal defense) — STORE-04
 - [ ] 03-06-PLAN.md — Wave 6: Rename endpoint + secure regression + boot smoke (D-17 one-shot OpenRouter rename + API-04 disclosure regression + uvicorn boot <3s) — API-04
