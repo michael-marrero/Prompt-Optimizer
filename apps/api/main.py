@@ -112,13 +112,15 @@ def create_app() -> FastAPI:
         max_age=600,
     )
 
-    # Routes — Wave 2 mounts only ``health``. Wave 3-6 grow this list.
-    # Imported inside the factory (not at module top) to avoid a
-    # circular-import surface area if a future route ever pulls
-    # from ``apps.api.main``.
-    from apps.api.routes import health
+    # Routes — Wave 2 mounted only ``health``; Wave 3 grew this list
+    # with ``threads`` (CRUD). Wave 4-6 plans extend it further
+    # (turn / settings / rename). Imported inside the factory
+    # (not at module top) to avoid a circular-import surface area if
+    # a future route ever pulls from ``apps.api.main``.
+    from apps.api.routes import health, threads
 
     app.include_router(health.router)
+    app.include_router(threads.router)
 
     return app
 
