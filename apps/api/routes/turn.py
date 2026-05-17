@@ -312,7 +312,7 @@ async def _get_or_create_adapter(app: Any, backend: str) -> Any:
 # --------------------------------------------------------------------
 
 
-@router.post("/threads/{thread_id}/turn")
+@router.post("/threads/{thread_id}/turn", response_model=None)
 async def post_turn(
     thread_id: str, body: TurnRequest, request: Request
 ) -> EventSourceResponse:
