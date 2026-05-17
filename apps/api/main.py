@@ -113,14 +113,16 @@ def create_app() -> FastAPI:
     )
 
     # Routes — Wave 2 mounted only ``health``; Wave 3 grew this list
-    # with ``threads`` (CRUD). Wave 4-6 plans extend it further
-    # (turn / settings / rename). Imported inside the factory
-    # (not at module top) to avoid a circular-import surface area if
-    # a future route ever pulls from ``apps.api.main``.
-    from apps.api.routes import health, threads
+    # with ``threads`` (CRUD) and ``settings`` (masked GET + PATCH).
+    # Wave 4-6 plans extend it further (turn / rename). Imported
+    # inside the factory (not at module top) to avoid a circular-
+    # import surface area if a future route ever pulls from
+    # ``apps.api.main``.
+    from apps.api.routes import health, settings, threads
 
     app.include_router(health.router)
     app.include_router(threads.router)
+    app.include_router(settings.router)
 
     return app
 
