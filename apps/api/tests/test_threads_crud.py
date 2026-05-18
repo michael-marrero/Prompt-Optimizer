@@ -58,6 +58,7 @@ Cross-refs:
 from __future__ import annotations
 
 import importlib
+from pathlib import Path
 
 import httpx
 import pytest
@@ -378,3 +379,174 @@ async def test_delete_thread_returns_404_for_unknown(
             resp = await client.delete("/api/v1/threads/unknown")
 
     assert resp.status_code == 404
+
+
+# ---------------------------------------------------------------------
+# Test 10 — DELETE cascades to blob files (Wave 5 / STORE-04 / D-14)
+# ---------------------------------------------------------------------
+
+
+async def test_delete_unlinks_blobs(
+    monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    """Canonical STORE-04 cascade test: DELETE removes blob files first.
+
+    Round-trip:
+        1. POST /threads to create a thread.
+        2. POST /threads/{id}/turn with a FakeStreamingAdapter that
+           emits a >=256KB Screenshot — the route's
+           ``_maybe_externalize_screenshot`` writes the file to
+           ``<BLOBS_DIR>/<sha>.png`` and stores the ``image_ref`` in
+           the assistant message's ``content_blocks`` JSON.
+        3. DELETE /threads/{id} — the extended ``delete_thread`` walks
+           the assistant's ``content_blocks``, unlinks the blob file
+           BEFORE the DB cascade (D-14 order), then deletes the
+           thread row (FK CASCADE removes messages +
+           routing_decisions).
+
+    Invariants verified:
+        - Blob file exists on disk immediately after the turn.
+        - After DELETE, the blob file is GONE.
+        - GET /threads/{id} returns 404 (DB rows cascaded).
+        - SELECT COUNT(*) FROM messages WHERE thread_id = ? returns 0
+          (FK cascade).
+
+    This is the integration counterpart to the unit-level
+    ``test_blobs_by_hash.py`` sub-tests; the two together exercise
+    every node of the STORE-04 + D-14 surface.
+    """
+
+    import base64
+    import json
+    import sys
+    import importlib
+
+    monkeypatch.setenv("PROMPT_OPTIMIZER_HOME", str(tmp_path))
+
+    # Same purge/reload chain as test_turn_streaming.py:_fresh_app —
+    # the Phase 1 D-18 smoke test invalidates cached class identities
+    # when this file runs after src/routing/tests/.
+    for name in list(sys.modules):
+        if name.startswith("sse_starlette"):
+            del sys.modules[name]
+
+    import apps.api.paths
+
+    importlib.reload(apps.api.paths)
+    import apps.api.blobs
+
+    importlib.reload(apps.api.blobs)
+    import apps.api.jsonl_log
+
+    importlib.reload(apps.api.jsonl_log)
+    import apps.api.db.queries
+
+    importlib.reload(apps.api.db.queries)
+    import apps.api.lifespan
+
+    importlib.reload(apps.api.lifespan)
+    import apps.api.routes.turn
+
+    importlib.reload(apps.api.routes.turn)
+    import apps.api.main
+
+    importlib.reload(apps.api.main)
+    app = apps.api.main.create_app()
+
+    from apps.api.backends.chunks import Done, Screenshot
+    from apps.api.paths import BLOBS_DIR
+    from apps.api.tests.fake_adapter import FakeStreamingAdapter
+
+    raw = b"P" * (300 * 1024)
+    b64 = base64.b64encode(raw).decode("ascii")
+    fake = FakeStreamingAdapter(
+        [Screenshot(step=1, image_b64=b64), Done()]
+    )
+    app.state.adapters = {"openrouter": fake}
+
+    from src.routing.schema import RoutingDecision
+
+    def fake_decide(*args, **kwargs):
+        return RoutingDecision(
+            backend="openrouter",
+            model_or_agent="openai/gpt-5",
+            rationale="test",
+            confidence=0.9,
+            signals={"task_type": "browse"},
+        )
+
+    monkeypatch.setattr("apps.api.routes.turn.decide", fake_decide)
+
+    async with app.router.lifespan_context(app):
+        async with httpx.AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test"
+        ) as client:
+            # Step 1 — create the thread.
+            create_resp = await client.post(
+                "/api/v1/threads", json={"title": "with-blob"}
+            )
+            assert create_resp.status_code == 200
+            thread_id = create_resp.json()["id"]
+
+            # Step 2 — POST a turn that emits the large Screenshot.
+            image_ref: str | None = None
+            async with client.stream(
+                "POST",
+                f"/api/v1/threads/{thread_id}/turn",
+                json={"message": "browse"},
+            ) as resp:
+                assert resp.status_code == 200, (
+                    f"turn failed: {resp.status_code} {await resp.aread()!r}"
+                )
+                current_event: str | None = None
+                async for line in resp.aiter_lines():
+                    if line.startswith("event:"):
+                        current_event = line.split(":", 1)[1].strip()
+                        if current_event == "done":
+                            break
+                    elif line.startswith("data:") and current_event == "screenshot":
+                        payload = json.loads(line.split(":", 1)[1].strip())
+                        image_ref = payload.get("image_ref")
+
+            assert image_ref is not None, (
+                "Screenshot event must carry image_ref for >=256KB payload"
+            )
+            ref_path = Path(image_ref)
+            assert ref_path.exists(), (
+                f"blob file must exist on disk at {ref_path} after turn"
+            )
+            assert str(ref_path).startswith(str(BLOBS_DIR)), (
+                f"blob path must be under BLOBS_DIR; got {ref_path}"
+            )
+
+            # Step 3 — DELETE the thread; cascade must remove the blob
+            # BEFORE the DB rows.
+            delete_resp = await client.delete(
+                f"/api/v1/threads/{thread_id}"
+            )
+            assert delete_resp.status_code == 204, (
+                f"DELETE returned {delete_resp.status_code}: "
+                f"{delete_resp.text}"
+            )
+
+            # D-14 invariant: blob file is GONE after cascade.
+            assert not ref_path.exists(), (
+                f"blob file must be unlinked by cascade delete; "
+                f"still present at {ref_path}"
+            )
+
+            # FK CASCADE: thread row + dependent messages all gone.
+            get_resp = await client.get(f"/api/v1/threads/{thread_id}")
+            assert get_resp.status_code == 404, (
+                f"GET after delete must return 404; got {get_resp.status_code}"
+            )
+
+            db = app.state.db
+            async with db.execute(
+                "SELECT COUNT(*) FROM messages WHERE thread_id = ?",
+                (thread_id,),
+            ) as cur:
+                msg_count = (await cur.fetchone())[0]
+            assert msg_count == 0, (
+                f"FK CASCADE must remove all messages; got {msg_count}"
+            )
