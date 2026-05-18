@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 03-04-PLAN.md (Wave 4 SSE turn handler — HEART of Phase 3)
-last_updated: "2026-05-17T17:53:07.198Z"
-last_activity: 2026-05-17
+stopped_at: Completed 03-05-PLAN.md (Wave 5 blob storage + cascade unlink — STORE-04)
+last_updated: "2026-05-18T00:14:09.636Z"
+last_activity: 2026-05-18
 progress:
   total_phases: 6
   completed_phases: 2
   total_plans: 23
-  completed_plans: 21
-  percent: 91
+  completed_plans: 22
+  percent: 96
 ---
 
 # Project State
@@ -26,11 +26,11 @@ See: .planning/PROJECT.md (updated 2026-05-11)
 ## Current Position
 
 Phase: 03 (fastapi-service-persistent-storage) — EXECUTING
-Plan: 6 of 7
+Plan: 7 of 7
 Status: Ready to execute
-Last activity: 2026-05-17
+Last activity: 2026-05-18
 
-Progress: [█████████░] 91%
+Progress: [██████████] 96%
 
 ## Performance Metrics
 
@@ -79,6 +79,7 @@ Progress: [█████████░] 91%
 | Phase 03 P02 | 1h 9m | 3 tasks | 7 files |
 | Phase 03 P03 | 38m | 3 tasks | 5 files |
 | Phase 03 P04 | 102m 51s | 3 tasks | 4 files |
+| Phase 03 P05 | 23m | 4 tasks | 5 files |
 
 ## Accumulated Context
 
@@ -161,6 +162,11 @@ Recent decisions affecting current work:
 - [Phase ?]: [Phase 03]: Phase 3 Plan 04 (Wave 4) Rule 1: _fresh_app test helper purges sse_starlette from sys.modules before reloading apps.api.routes.turn — Phase 1 D-18 smoke test deletes starlette/fastapi/pydantic/httpx, leaving turn.py's cached EventSourceResponse class inheriting from a STALE starlette.responses.Response while freshly-reimported FastAPI compares against the NEW class — isinstance() fails and FastAPI falls through to jsonable_encoder. Test-only Rule 1 workaround; production unchanged.
 - [Phase ?]: [Phase 03]: Phase 3 Plan 04 (Wave 4): sse_starlette 3.4.4 does NOT export DEFAULT_PING_INTERVAL as module-level (CLASS attribute on EventSourceResponse). Tests use FastPingResponse subclass overriding DEFAULT_PING_INTERVAL=0.3 AND forcing ping=0.3 in __init__ — both paths needed because production passes ping=15 which wins over the class default when non-None.
 - [Phase ?]: [Phase 03]: Phase 3 Plan 04 (Wave 4): cancellation budget enforced via time.monotonic() inline assertion (elapsed < 2.0) per CONTEXT critical context; @pytest.mark.timeout(5) is belt-and-suspenders. 9 tests pass in 4.5s; whole-repo 276 passed / 2 skipped / 3 deselected in both apps/ src/ and src/ apps/ orderings.
+- [Phase ?]: [Phase 03]: Phase 3 Plan 05 (Wave 5) Rule 1: docstring anti-pattern names rewritten to satisfy negative-grep CI guards. Same pattern as Wave 4's response.aclose rewrite.
+- [Phase ?]: [Phase 03]: Phase 3 Plan 05 (Wave 5): Pitfall 11 unique tmp suffix landed as secrets.token_hex(4) — 4 random bytes per write means 2^32 distinct in-flight values per target path, ample for single-user scale.
+- [Phase ?]: [Phase 03]: Phase 3 Plan 05 (Wave 5): _is_inside_blobs_dir uses Path.resolve() + relative_to() containment (boundary-safe — raises ValueError on non-descendant) instead of str-prefix startswith (which falsely passes sibling dirs like BLOBS_DIR_evil). T-03-Path defense.
+- [Phase ?]: [Phase 03]: Phase 3 Plan 05 (Wave 5): D-14 cascade order codified — filesystem unlinks FIRST, DB cascade SECOND. Interrupted delete leaves recoverable orphan blobs rather than unrecoverable stale DB refs. Verified by test_delete_unlinks_blobs.
+- [Phase ?]: [Phase 03]: Phase 3 Plan 05 (Wave 5): _collect_blob_refs_from_content_blocks collects both image_ref AND diff_ref (forward-compat with future FileDiff externalization); v1 adapters don't yet emit >256KB diffs but the JSON walker shape covers them.
 
 ### Pending Todos
 
@@ -183,6 +189,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-05-17T17:53:07.141Z
-Stopped at: Completed 03-04-PLAN.md (Wave 4 SSE turn handler — HEART of Phase 3)
+Last session: 2026-05-18T00:14:09.628Z
+Stopped at: Completed 03-05-PLAN.md (Wave 5 blob storage + cascade unlink — STORE-04)
 Resume file: None
