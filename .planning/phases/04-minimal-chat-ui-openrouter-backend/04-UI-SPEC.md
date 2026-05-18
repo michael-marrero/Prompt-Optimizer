@@ -1,10 +1,12 @@
 ---
 phase: 4
 slug: minimal-chat-ui-openrouter-backend
-status: draft
+status: approved
 shadcn_initialized: true
 preset: shadcn/ui new-york (Tailwind v4, light mode only)
 created: 2026-05-18
+reviewed_at: 2026-05-18
+revisions: 2
 ---
 
 # Phase 4 — UI Design Contract
@@ -64,19 +66,21 @@ Tailwind v4 default 4px-grid is canonical. All Phase 4 components use multiples 
 
 ## 3. Typography
 
-Two weights (regular `font-normal` = 400, semibold `font-semibold` = 600). Bold (`font-bold` = 700) is reserved for the `Routed to <model_name>` portion of the chip per CONTEXT D-12. Four sizes total.
+Two weights total. Regular (`font-normal` = 400) for body text. Semibold (`font-semibold` = 600) for headings, chip prefix + model name, modal heading, and section labels. Four sizes total.
+
+**CONTEXT D-12 note:** D-12 specifies the chip's `Routed to <model_name>` prefix as "bold" informally. This UI-SPEC implements that emphasis as `font-semibold` (600) — not `font-bold` (700) — to keep the type system on exactly 2 weights. At 13px on a slate-100 chip background, the visual distinction between 600 and 700 is negligible while the semantic emphasis is preserved.
 
 | Role | Size | Tailwind class | Weight | Line height | Usage |
 |------|------|----------------|--------|-------------|-------|
 | Mono / metrics | 12px | `text-xs font-mono` | 400 | 1.5 (`leading-normal`) | Metrics footer (`$0.0021 · 1.4s · 312↑/847↓`), `streaming…` mid-stream placeholder |
-| Label / chip | 13px | `text-[13px]` | 400 (rationale) + 700 (`font-bold` on model name) | 1.4 | Routing chip text, action-row tooltips |
+| Label / chip | 13px | `text-[13px]` | 400 (rationale) + 600 (`font-semibold` on `Routed to` + model name) | 1.4 | Routing chip text, action-row tooltips |
 | Body | 14px | `text-sm` | 400 | 1.5 (`leading-relaxed` for prose, `leading-normal` for chrome) | ChatBubble markdown body, composer text, modal body copy, toast text |
 | Heading | 18px | `text-lg` | 600 (`font-semibold`) | 1.3 | Modal heading ("Connect OpenRouter to get started"), `/settings` section headings, empty-state tagline |
 
 **No `text-base` (16px), no `text-xl`, no `text-2xl` in Phase 4.** The empty-state tagline uses `text-lg` (18px) intentionally — the marketing tagline weight comes from visual centering and surrounding whitespace, not a larger font size. The composer placeholder uses `text-sm` (14px) — same size as user input.
 
 **Code block typography (inside markdown):**
-- Inline `code` spans: `text-sm font-mono` with `bg-slate-100 px-1 py-0.5 rounded-sm`
+- Inline `code` spans: `text-sm font-mono` with `bg-slate-100 px-1 py-1 rounded-sm`
 - Fenced code blocks: `text-sm font-mono leading-relaxed` rendered by shiki primitive (`github-light` theme tokens override inline color)
 
 **Markdown heading scale (rendered inside ChatBubble assistant output):** assistant-ui-react-markdown defaults applied. H1 = `text-xl font-semibold` (20px), H2 = `text-lg font-semibold` (18px), H3 = `text-base font-semibold` (16px). These appear ONLY inside LLM-rendered markdown and are not part of the app chrome scale.
@@ -211,10 +215,12 @@ Exact string template:
 
 Rendered as:
 
-- `Routed to` — bold (`font-bold`).
-- ` {display_name}` — bold (`font-bold`).
+- `Routed to` — semibold (`font-semibold`).
+- ` {display_name}` — semibold (`font-semibold`).
 - ` · ` — neutral separator (regular weight, single space on each side).
 - `{rationale}` — regular weight (`font-normal`).
+
+CONTEXT D-12 specifies "bold" informally for the prefix and model name. This UI-SPEC implements that as `font-semibold` (600) — see §3 typography note — to keep the system on exactly 2 weights.
 
 `display_name` resolves from `config/model_mapping.json` keyed by the `model_or_agent` field on the `RoutingDecision` payload. Examples confirmed against the existing mapping file:
 
@@ -315,7 +321,7 @@ Element styles (applied via the react-markdown components map, NOT via a `prose`
 | `li` | `mb-1` |
 | `h1`/`h2`/`h3` | `font-semibold text-slate-900 mb-2 mt-4 first:mt-0` (sizes per §3) |
 | `a` | `text-slate-900 underline underline-offset-2 hover:text-slate-700` |
-| `code` (inline) | `text-sm font-mono bg-slate-100 px-1 py-0.5 rounded-sm` |
+| `code` (inline) | `text-sm font-mono bg-slate-100 px-1 py-1 rounded-sm` |
 | `pre` (fenced — shiki-rendered) | `text-sm font-mono leading-relaxed rounded-md overflow-x-auto p-4 my-3` — shiki injects `github-light` background |
 | `blockquote` | `border-l-4 border-slate-300 pl-4 italic text-slate-700` |
 
@@ -482,16 +488,18 @@ Inline red banner rendered **inside** the assistant ChatBubble (not above, not b
 ```
 +-----------------------------------------------+
 |  ⚠  {user_friendly_message}                   |
-|     [Retry]                                   |
+|     [Try again]                               |
 +-----------------------------------------------+
 ```
 
 | Element | Tailwind |
 |---------|----------|
 | Banner | `mt-3 first:mt-0 flex items-start gap-3 rounded-md border border-red-300 bg-red-50 p-3 text-sm text-red-900` |
-| Icon | `lucide-react` `AlertCircle` (16px) `text-red-600 mt-0.5 flex-shrink-0` |
+| Icon | `lucide-react` `AlertCircle` (16px) `text-red-600 flex-shrink-0` |
 | Message | `flex-1 leading-relaxed` |
-| Retry button | `mt-2 inline-flex h-8 items-center rounded-md border border-red-300 bg-white px-3 text-xs font-semibold text-red-900 hover:bg-red-100` — shown only when `retriable === true` |
+| Retry button | `mt-2 inline-flex h-8 items-center rounded-md border border-red-300 bg-white px-3 text-xs font-semibold text-red-900 hover:bg-red-100` — shown only when `retriable === true`. Visible label: `Try again`. |
+
+> **Icon alignment note:** Icon vertical alignment is handled by the parent flex row's `items-start` rule (set on the banner row above). No explicit margin needed on the `AlertCircle` icon. Optical alignment is acceptable without a 2px nudge at 16px icon size in a 13/14px text row — and 2px would violate the §2 multiple-of-4 spacing rule.
 
 ### 12.2 Error code → user-friendly message catalog
 
@@ -513,7 +521,7 @@ Code suffix format: ` (` + monospace code + `)` rendered as `<code class="font-m
 
 ### 12.3 ARIA
 
-`role="alert"` on the banner (announces immediately to assistive tech). Retry button `aria-label="Retry the failed turn"`.
+`role="alert"` on the banner (announces immediately to assistive tech). Retry button visible text is `Try again`; aria-label is `Retry the failed turn` (the aria-label stays specific for screen readers; the visible label is the friendlier phrasal verb).
 
 ---
 
@@ -660,8 +668,9 @@ All user-facing strings in Phase 4. Any new string introduced during execution M
 | Settings section heading | `OpenRouter API key` |
 | Settings save button (updating) | `Update key` |
 | StreamError prefix | (per code, see §12.2) |
-| Retry button | `Retry` |
-| Chip prefix | `Routed to ` (bold) |
+| Retry button (visible text) | `Try again` |
+| Retry button (aria-label) | `Retry the failed turn` |
+| Chip prefix | `Routed to ` (`font-semibold`, per §3 + CONTEXT D-12) |
 | Chip separator | ` · ` (regular weight) |
 | Streaming placeholder | `streaming` + animated dot |
 
@@ -725,11 +734,11 @@ The UI-SPEC is complete and self-sufficient. The planner does NOT need to revisi
 
 ## 21. Checker Sign-Off
 
-- [ ] Dimension 1 Copywriting: PASS — §17 declares every user-facing string with exact characters
-- [ ] Dimension 2 Visuals: PASS — §5 declares layout; §6–13 declare every component's structure
-- [ ] Dimension 3 Color: PASS — §4 declares the 60/30/10 split + accent reserved-for list + WCAG ratios in §14.1
-- [ ] Dimension 4 Typography: PASS — §3 declares 4 sizes × 2 weights with line heights
-- [ ] Dimension 5 Spacing: PASS — §2 declares the 4-grid scale with no exceptions
-- [ ] Dimension 6 Registry Safety: PASS — §18 declares only official shadcn registry; no third-party blocks
+- [x] Dimension 1 Copywriting: PASS — §17 declares every user-facing string with exact characters; retry visible label is `Try again` (verb + implicit-object phrasal), aria-label `Retry the failed turn`
+- [x] Dimension 2 Visuals: PASS — §5 declares layout; §6–13 declare every component's structure
+- [x] Dimension 3 Color: PASS — §4 declares the 60/30/10 split + accent reserved-for list + WCAG ratios in §14.1
+- [x] Dimension 4 Typography: PASS — §3 declares 4 sizes × 2 weights (`font-normal` 400, `font-semibold` 600) with line heights; CONTEXT D-12 "bold" implemented as `font-semibold` per §3 note
+- [x] Dimension 5 Spacing: PASS — §2 declares the 4-grid scale with no exceptions; inline `code` span uses `px-1 py-1` (4px on both axes); `mt-0.5` removed from §12.1 icon (delegated to parent `items-start`)
+- [x] Dimension 6 Registry Safety: PASS — §18 declares only official shadcn registry; no third-party blocks
 
-**Approval:** pending (gsd-ui-checker will upgrade `status: draft` → `status: approved` and timestamp this line)
+**Approval:** approved 2026-05-18 by gsd-ui-checker (revision 2 of 2; 6/6 dimensions PASS; 1 non-blocking FLAG accepted — 12px/13px size proximity mitigated by mono-vs-sans typographic distinction).
