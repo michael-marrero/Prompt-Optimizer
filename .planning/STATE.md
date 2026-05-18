@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-status: executing
-stopped_at: Completed 03-05-PLAN.md (Wave 5 blob storage + cascade unlink — STORE-04)
-last_updated: "2026-05-18T00:14:09.636Z"
+status: verifying
+stopped_at: Completed Phase 3 Wave 6 (03-06-PLAN.md) — Phase 3 closed; ready for /gsd-verify-work
+last_updated: "2026-05-18T01:42:07.432Z"
 last_activity: 2026-05-18
 progress:
   total_phases: 6
-  completed_phases: 2
+  completed_phases: 3
   total_plans: 23
-  completed_plans: 22
-  percent: 96
+  completed_plans: 23
+  percent: 100
 ---
 
 # Project State
@@ -27,10 +27,10 @@ See: .planning/PROJECT.md (updated 2026-05-11)
 
 Phase: 03 (fastapi-service-persistent-storage) — EXECUTING
 Plan: 7 of 7
-Status: Ready to execute
+Status: Phase complete — ready for verification
 Last activity: 2026-05-18
 
-Progress: [██████████] 96%
+Progress: [██████████] 100%
 
 ## Performance Metrics
 
@@ -80,6 +80,7 @@ Progress: [██████████] 96%
 | Phase 03 P03 | 38m | 3 tasks | 5 files |
 | Phase 03 P04 | 102m 51s | 3 tasks | 4 files |
 | Phase 03 P05 | 23m | 4 tasks | 5 files |
+| Phase 03 P06 | 81m | 5 tasks | 6 files |
 
 ## Accumulated Context
 
@@ -167,6 +168,11 @@ Recent decisions affecting current work:
 - [Phase ?]: [Phase 03]: Phase 3 Plan 05 (Wave 5): _is_inside_blobs_dir uses Path.resolve() + relative_to() containment (boundary-safe — raises ValueError on non-descendant) instead of str-prefix startswith (which falsely passes sibling dirs like BLOBS_DIR_evil). T-03-Path defense.
 - [Phase ?]: [Phase 03]: Phase 3 Plan 05 (Wave 5): D-14 cascade order codified — filesystem unlinks FIRST, DB cascade SECOND. Interrupted delete leaves recoverable orphan blobs rather than unrecoverable stale DB refs. Verified by test_delete_unlinks_blobs.
 - [Phase ?]: [Phase 03]: Phase 3 Plan 05 (Wave 5): _collect_blob_refs_from_content_blocks collects both image_ref AND diff_ref (forward-compat with future FileDiff externalization); v1 adapters don't yet emit >256KB diffs but the JSON walker shape covers them.
+- [Phase ?]: D-17 rename endpoint shipped (openai/gpt-4o-mini, max_cost_usd=0.01, tiktoken 1500-token cap, fresh per-request adapter, bypasses the routing brain)
+- [Phase ?]: API-04 canonical disclosure regression test landed (caplog + DB + settings.json + jsonl scans across 4 sub-tests)
+- [Phase ?]: ROADMAP Phase 3 SC #1 boot smoke verified: from apps.api.main import app under 3s warm (1.48s in-process, 2.11s fresh subprocess)
+- [Phase ?]: API-07 wording updated per D-16 — both asyncio.to_thread and starlette.concurrency.run_in_threadpool now permitted
+- [Phase ?]: Phase 3 complete: all 15 requirements satisfied, all 5 ROADMAP SC verifiable, 301/2/3 (passed/skipped/deselected) on whole-repo non-live suite
 
 ### Pending Todos
 
@@ -189,6 +195,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-05-18T00:14:09.628Z
-Stopped at: Completed 03-05-PLAN.md (Wave 5 blob storage + cascade unlink — STORE-04)
+Last session: 2026-05-18T01:42:07.424Z
+Stopped at: Completed Phase 3 Wave 6 (03-06-PLAN.md) — Phase 3 closed; ready for /gsd-verify-work
 Resume file: None

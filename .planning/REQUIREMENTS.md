@@ -34,7 +34,7 @@ Requirements for the auto-routing chat milestone. Each maps to a roadmap phase.
 - [x] **API-01**: FastAPI process loads all joblib artifacts once at `lifespan` startup; never reloaded per request
 - [x] **API-02**: `POST /threads/{thread_id}/turn` runs routing decision → dispatches adapter → streams `ChatChunk`s back via `fastapi.sse.EventSourceResponse`
 - [x] **API-03**: Thread CRUD endpoints (`POST /threads`, `GET /threads`, `GET /threads/{id}`, `PATCH /threads/{id}`, `DELETE /threads/{id}`)
-- [ ] **API-04**: BYOK settings endpoint accepts per-backend keys; keys held in-process only, never persisted to SQLite or logs
+- [x] **API-04**: BYOK settings endpoint accepts per-backend keys; keys held in-process only, never persisted to SQLite or logs
 - [x] **API-05**: SSE stream emits a heartbeat every 15 seconds during long agentic runs to defeat intermediate proxy timeouts
 - [x] **API-06**: Client-disconnect detection cancels in-flight upstream provider calls (`request.is_disconnected()` polling)
 - [x] **API-07**: Synchronous sklearn `predict` / `predict_proba` calls are wrapped in `asyncio.to_thread` (or equivalent thread-pool offload such as `starlette.concurrency.run_in_threadpool`) when invoked from async handlers
@@ -153,7 +153,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | API-01 | Phase 3 | Complete |
 | API-02 | Phase 3 | Complete |
 | API-03 | Phase 3 | Complete |
-| API-04 | Phase 3 | Pending |
+| API-04 | Phase 3 | Complete |
 | API-05 | Phase 3 | Complete |
 | API-06 | Phase 3 | Complete |
 | API-07 | Phase 3 | Complete |

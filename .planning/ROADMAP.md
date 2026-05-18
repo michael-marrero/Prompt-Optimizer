@@ -81,7 +81,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [x] 03-03-PLAN.md — Wave 3: Thread CRUD + settings (POST/GET/PATCH/DELETE /threads + GET masked / PATCH merge-patch /settings with adapter cache invalidation) — API-03
 - [x] 03-04-PLAN.md — Wave 4: SSE turn handler (POST /threads/{id}/turn — the heart; asyncio.to_thread decide + EventSourceResponse ping=15 + buffer-and-persist-on-Done + jsonl log + override_backend) — API-02, API-05, API-06, API-07, STORE-05, STORE-06
 - [x] 03-05-PLAN.md — Wave 5: Blob storage + cascade unlink (apps/api/blobs.py sha256 by-hash transcoder + delete_thread blob walk + path-traversal defense) — STORE-04
-- [ ] 03-06-PLAN.md — Wave 6: Rename endpoint + secure regression + boot smoke (D-17 one-shot OpenRouter rename + API-04 disclosure regression + uvicorn boot <3s) — API-04
+- [x] 03-06-PLAN.md — Wave 6: Rename endpoint + secure regression + boot smoke (D-17 one-shot OpenRouter rename + API-04 disclosure regression + uvicorn boot <3s) — API-04
 
 ### Phase 4: Minimal Chat UI (OpenRouter Backend)
 **Goal**: A running `next dev` app delivers a single-input multi-turn chat that streams OpenRouter responses through a Next.js route handler proxying FastAPI; the routing chip and one-line rationale appear on every assistant message; streaming markdown + code blocks render without flicker; stop button preserves partial responses. This phase exists to prove the SSE pipe end-to-end with one backend before adding two more.
