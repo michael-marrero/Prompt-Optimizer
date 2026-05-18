@@ -37,7 +37,7 @@ Requirements for the auto-routing chat milestone. Each maps to a roadmap phase.
 - [ ] **API-04**: BYOK settings endpoint accepts per-backend keys; keys held in-process only, never persisted to SQLite or logs
 - [x] **API-05**: SSE stream emits a heartbeat every 15 seconds during long agentic runs to defeat intermediate proxy timeouts
 - [x] **API-06**: Client-disconnect detection cancels in-flight upstream provider calls (`request.is_disconnected()` polling)
-- [x] **API-07**: Synchronous sklearn `predict` / `predict_proba` calls are wrapped in `run_in_threadpool` when invoked from async handlers
+- [x] **API-07**: Synchronous sklearn `predict` / `predict_proba` calls are wrapped in `asyncio.to_thread` (or equivalent thread-pool offload such as `starlette.concurrency.run_in_threadpool`) when invoked from async handlers
 - [x] **API-08**: Integration tests use `httpx AsyncClient + ASGITransport` (NOT `TestClient`) to exercise streaming end-to-end
 
 ### Chat UI
