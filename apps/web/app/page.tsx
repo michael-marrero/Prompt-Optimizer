@@ -94,7 +94,14 @@ function AssistantMessage(): React.JSX.Element {
 }
 
 export default function ChatPage(): React.JSX.Element {
-  const { runtime } = useChatThread();
+  const { runtime, threadId } = useChatThread();
+  // Until the default thread id is loaded (or auto-created on first run),
+  // the chat route handler rejects with 400 ("threadId is required").
+  // Disable the composer textarea/Send while threadId is null so the user
+  // can't accidentally send a doomed request. Plan 07's first-run modal
+  // wraps this with a key-missing gate; here we only address the
+  // hydration race between mount and the /api/threads round-trip.
+  const composerDisabled = threadId === null;
 
   return (
     <div className="flex flex-col h-screen">
@@ -138,7 +145,8 @@ export default function ChatPage(): React.JSX.Element {
               <div className="max-w-3xl mx-auto flex items-end gap-2">
                 <ComposerPrimitive.Input
                   placeholder="Type a message…"
-                  className="flex-1 min-h-12 max-h-48 resize-none rounded-md border border-slate-300 bg-white px-3 py-2 text-sm leading-normal text-slate-900 placeholder:text-slate-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-900 focus-visible:ring-offset-2"
+                  disabled={composerDisabled}
+                  className="flex-1 min-h-12 max-h-48 resize-none rounded-md border border-slate-300 bg-white px-3 py-2 text-sm leading-normal text-slate-900 placeholder:text-slate-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-900 focus-visible:ring-offset-2 disabled:bg-slate-50 disabled:cursor-not-allowed"
                 />
                 <ComposerPrimitive.Send
                   aria-label="Send message"

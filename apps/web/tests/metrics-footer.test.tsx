@@ -35,8 +35,10 @@ function withMetrics(data: {
   tokens_in: number | null;
   tokens_out: number | null;
 }) {
+  // assistant-ui exposes the data-metrics part on `content`, not `parts`.
+  // See RoutingChip.tsx for the rationale.
   return {
-    parts: [
+    content: [
       {
         type: "data",
         name: "metrics",
@@ -48,7 +50,7 @@ function withMetrics(data: {
 
 describe("UI-07 unit — MetricsFooter", () => {
   it("UI-07: mid-stream (no metrics part) renders 'streaming●' with animate-pulse on the dot", () => {
-    mockedUseMessage.mockReturnValue({ parts: [] });
+    mockedUseMessage.mockReturnValue({ content: [] });
     render(<MetricsFooter />);
     const footer = screen.getByLabelText("Streaming response in progress");
     expect(footer.textContent).toMatch(/streaming/);
@@ -127,7 +129,7 @@ describe("UI-07 unit — MetricsFooter", () => {
   });
 
   it("UI-07: footer uses font-mono and text-xs classes (UI-SPEC §7.1)", () => {
-    mockedUseMessage.mockReturnValue({ parts: [] });
+    mockedUseMessage.mockReturnValue({ content: [] });
     const { container } = render(<MetricsFooter />);
     const footer = container.firstChild as HTMLElement;
     expect(footer.className).toMatch(/font-mono/);

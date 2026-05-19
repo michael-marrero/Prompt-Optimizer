@@ -47,13 +47,14 @@ function formatTokens(n: number | null): string {
   return v.toLocaleString("en-US");
 }
 
-// Minimal structural shape — see RoutingChip.tsx for the same MessageState
-// caveat (the runtime/api MessageState type omits `parts`; the runtime
-// VALUE carries it). We treat the return of useMessage() as a structural
-// type that has `parts`.
+// Minimal structural shape — see RoutingChip.tsx for the same content
+// vs parts rationale: assistant-ui v0.14.5's useMessage() returns the raw
+// ThreadMessage with a `content` array (not `parts`). data-metrics chunks
+// from the AI SDK v6 stream land as content entries of shape
+// {type: "data", name: "metrics", data: <MetricsPayload>}.
 type DataPart = { readonly type: "data"; readonly name: string; readonly data: unknown };
 type PartLike = { readonly type: string };
-type MessageStateWithParts = { readonly parts: ReadonlyArray<PartLike> };
+type MessageStateWithContent = { readonly content: ReadonlyArray<PartLike> };
 
 function isMetricsPart(
   p: PartLike,
@@ -63,9 +64,9 @@ function isMetricsPart(
 
 export function MetricsFooter(): React.JSX.Element {
   const message = useMessage({ optional: true }) as
-    | MessageStateWithParts
+    | MessageStateWithContent
     | null;
-  const metricsPart = message?.parts?.find(isMetricsPart);
+  const metricsPart = message?.content?.find(isMetricsPart);
 
   // Mid-stream placeholder — UI-SPEC §7.1. The animated dot communicates
   // "still streaming" while leaving room for the final layout to remain

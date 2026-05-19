@@ -13,10 +13,10 @@
 //   2. apps/web/lib/sse-translate.ts forwards this as an AI SDK v6 chunk
 //      `{type: "data-routing", data: <5-key>}`.
 //   3. @assistant-ui/react-ai-sdk's convertMessage maps any AI SDK part whose
-//      `type` starts with `data-` into a MessageState part of shape
+//      `type` starts with `data-` into an assistant-ui content entry of shape
 //      `{type: "data", name: "routing", data: <RoutingDecision>}`
 //      (see node_modules/@assistant-ui/react-ai-sdk/dist/ui/utils/convertMessage.js).
-//   4. This component finds that part via `useMessage().parts.find(...)`
+//   4. This component finds that entry via `useMessage().content.find(...)`
 //      and renders the chip.
 //
 // IMPORTANT (Blocker 1 — Plan 05 revision iteration 1):
@@ -55,16 +55,23 @@ const chipClassByBackend: Record<Backend, string> = {
 type ModelMappingEntry = { display_name?: string };
 const modelMapping = mapping as Record<string, ModelMappingEntry>;
 
-// Minimal structural shape of a data part — `useMessage().parts` carries
-// these alongside text / reasoning / tool parts. The MessageState type
-// exported from @assistant-ui/core has TWO definitions in the package — the
-// runtime/api one omits `parts`, the store/scopes one includes it. The
-// runtime value DOES expose `parts` (see useMessage's JS source which reads
-// the store state), so we treat the returned object as a structural type
-// that carries `parts`.
+// Minimal structural shape of a data part. The chip reads from
+// `useMessage().content` — the raw ThreadMessage content array carried
+// through from the AI SDK runtime via assistant-ui's converter. The
+// AI-SDK v6 stream's `data-routing` chunks are converted by
+// @assistant-ui/react-ai-sdk's convertMessage.js into elements of shape
+// `{type: "data", name: "routing", data: <RoutingDecision>}` which land
+// directly on the message's `content` array.
+//
+// Note on naming: assistant-ui's runtime types refer to this as `parts`
+// in some surfaces (MessageState in store/scopes/message.d.ts adds a
+// `parts: PartState[]` derived from content), but the value exposed by
+// useMessage() in v0.14.5 is the raw ThreadMessage which only has
+// `content`. We read `content` directly so the chip works regardless of
+// whether the MessageClient wrapping is active.
 type DataPart = { readonly type: "data"; readonly name: string; readonly data: unknown };
 type PartLike = { readonly type: string };
-type MessageStateWithParts = { readonly parts: ReadonlyArray<PartLike> };
+type MessageStateWithContent = { readonly content: ReadonlyArray<PartLike> };
 
 function isRoutingPart(
   p: PartLike,
@@ -75,15 +82,11 @@ function isRoutingPart(
 export function RoutingChip(): React.JSX.Element | null {
   // useMessage is optional here so the chip doesn't crash if rendered outside
   // a MessagePrimitive context (e.g. in isolation during a Storybook story).
-  // We cast through `unknown` because the @assistant-ui/core MessageState
-  // type exported by the runtime API omits `parts` even though the runtime
-  // value carries it.
   const message = useMessage({ optional: true }) as
-    | MessageStateWithParts
+    | MessageStateWithContent
     | null;
-  // Find the data-routing part. assistant-ui converts AI SDK v6 `data-routing`
-  // chunks into parts of shape {type:"data", name:"routing", data:<5-key>}.
-  const routingPart = message?.parts?.find(isRoutingPart);
+  // Find the data-routing part on the message's content array.
+  const routingPart = message?.content?.find(isRoutingPart);
 
   if (!routingPart) return null;
 

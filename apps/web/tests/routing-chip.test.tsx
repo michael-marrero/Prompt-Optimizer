@@ -37,7 +37,10 @@ beforeEach(() => {
   mockedUseMessage.mockReset();
 });
 
-// Helper: build a MessageState-shaped fixture with one routing data part.
+// Helper: build a MessageState-shaped fixture with one routing data
+// entry on `content`. The chip reads `useMessage().content` because that
+// is the array @assistant-ui/react-ai-sdk's convertMessage populates with
+// the converted `data-routing` chunks.
 function withRoutingPart(routingData: {
   backend: string;
   model_or_agent: string;
@@ -46,7 +49,7 @@ function withRoutingPart(routingData: {
   signals: Record<string, unknown>;
 }) {
   return {
-    parts: [
+    content: [
       {
         type: "data",
         name: "routing",
@@ -58,7 +61,7 @@ function withRoutingPart(routingData: {
 
 describe("UI-04 unit — RoutingChip", () => {
   it("renders null when the message has no routing data part", () => {
-    mockedUseMessage.mockReturnValue({ parts: [] });
+    mockedUseMessage.mockReturnValue({ content: [] });
     const { container } = render(<RoutingChip />);
     expect(container.firstChild).toBeNull();
   });
