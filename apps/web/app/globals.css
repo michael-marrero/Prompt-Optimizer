@@ -1,0 +1,19 @@
+/* Tailwind v4 CSS-first config — UI-SPEC §1, CONTEXT D-03/D-04 (light mode only).
+ * The shadcn nova preset already wrote its own @theme tokens elsewhere; this
+ * file is the entry point Next bundles. NO prefers-color-scheme branch: Phase 4
+ * is light-mode-only and dark mode is deferred to Phase 6+ (CONTEXT D-04). */
+@import "tailwindcss";
+
+@theme inline {
+  --color-background: #ffffff;
+  --color-foreground: #0f172a; /* slate-900 — UI-SPEC §4.1 text-default */
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+}
+
+body {
+  background: var(--color-background);
+  color: var(--color-foreground);
+  font-family: var(--font-sans), ui-sans-serif, system-ui, -apple-system,
+    "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+}

@@ -36,3 +36,11 @@ chat.db
 
 # Already-committed paths to LEAVE alone
 # (this file does NOT exclude data_processed/, models/, evaluation/ — those are LFS-tracked)
+
+# Next.js (Phase 4)
+apps/web/node_modules/
+apps/web/.next/
+apps/web/coverage/
+apps/web/playwright-report/
+apps/web/test-results/
+apps/web/.env.local

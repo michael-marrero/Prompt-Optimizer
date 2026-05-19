@@ -641,3 +641,19 @@ This project uses data from `LLMRouterBench`. If you use this project or the ori
   howpublished = {\url{https://github.com/ynulihao/LLMRouterBench}},
   note         = {Findings of ACL 2026}
 }
+```
+
+---
+
+## Running the chat UI
+
+Terminal 1 (FastAPI):
+    uv sync
+    uvicorn apps.api.main:app --reload
+
+Terminal 2 (Next.js):
+    pnpm --dir apps/web install
+    pnpm --dir apps/web dev
+
+Then open http://localhost:3000.
+On first run, paste your OpenRouter key into the modal.
