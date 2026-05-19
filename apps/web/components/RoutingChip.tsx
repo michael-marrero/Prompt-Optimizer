@@ -36,9 +36,12 @@
 import { useMessage } from "@assistant-ui/react";
 import { cn } from "@/lib/cn";
 import type { Backend, RoutingDecision } from "@/lib/types";
-// Bundled JSON import (Pitfall 12 — never fs.readFileSync at request time;
-// model_mapping.json is repo-committed source-of-truth keyed by benchmark slug).
-import mapping from "../../../config/model_mapping.json";
+// Bundled JSON import (Pitfall 12 — never fs.readFileSync at request time).
+// The canonical source-of-truth is repo-root config/model_mapping.json;
+// apps/web/lib/model-mapping.json is a build-time mirror of that file
+// (Turbopack rejects relative imports that traverse outside apps/web).
+// Keep the two files in sync — update both, or wire a pre-build copy step.
+import mapping from "@/lib/model-mapping.json";
 
 // Backend → chip color class (UI-SPEC §6.3). Unknown backends fall back to
 // the openrouter palette (graceful degradation, even though Plan 02's Zod
