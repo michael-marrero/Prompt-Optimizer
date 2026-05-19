@@ -379,4 +379,23 @@ describe("D-07 contract — translateNamedSSEToUIMessageStream", () => {
     expect(deltas.length).toBe(1);
     expect((deltas[0] as { delta: string }).delta).toBe("hi");
   });
+
+  it("CRLF line endings (sse-starlette wire format) are parsed correctly — Plan 03 regression", async () => {
+    // sse-starlette (Phase 3) emits CRLF (`\r\n`) line endings; the
+    // earlier Wave 1 fixtures all used LF (`\n`) so this case never
+    // exercised. The translator normalises CRLF → LF in its buffer
+    // accumulator. Without that normalisation indexOf("\n\n") never
+    // matches against a CRLF stream and zero chunks emit.
+    const crlf = [
+      "event: text_delta\r\n" +
+        'data: {"type":"text_delta","text":"crlf"}\r\n\r\n',
+    ];
+    const out = await consumeToText(
+      translateNamedSSEToUIMessageStream(fixtureStream(crlf)),
+    );
+    const chunks = parseEmittedChunks(out);
+    const deltas = chunks.filter((c) => typeOf(c) === "text-delta");
+    expect(deltas.length).toBe(1);
+    expect((deltas[0] as { delta: string }).delta).toBe("crlf");
+  });
 });

@@ -74,7 +74,18 @@ export function translateNamedSSEToUIMessageStream(
         for (;;) {
           const { done, value } = await reader.read();
           if (done) break;
-          buffer += decoder.decode(value, { stream: true });
+          // Per HTML Living Standard §9.2 the SSE line terminator can be
+          // `\r\n`, `\r`, or `\n`. sse-starlette (the Phase 3 framing) emits
+          // CRLF (`\r\n`), while the Vitest fixtures use LF (`\n`). Normalise
+          // to LF so the `indexOf("\n\n")` block boundary scan downstream is
+          // wire-format-agnostic. Without this, the translator's buffer grows
+          // unboundedly against a CRLF upstream and ZERO chunks ever emit.
+          // (Discovered during the Wave 2 smoke check; the unit-test fixtures
+          // used LF-only so the bug never surfaced under Vitest.)
+          buffer += decoder
+            .decode(value, { stream: true })
+            .replace(/\r\n/g, "\n")
+            .replace(/\r/g, "\n");
 
           // SSE blocks are separated by `\n\n`. Drain every complete block
           // in the accumulated buffer; the trailing partial (if any) is
