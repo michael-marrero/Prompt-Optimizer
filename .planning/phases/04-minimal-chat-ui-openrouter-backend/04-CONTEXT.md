@@ -120,10 +120,10 @@ Per-turn UX lifecycle:
 
 - **D-15: NEW SSE event type `routing_decision`** emitted by `apps/api/routes/turn.py` **before** adapter dispatch. **This is a Phase 3 wire-format extension required by Phase 4.**
   - **Does NOT modify the Phase 2 `ChatChunk` Pydantic union** — the event is yielded by the SSE handler alongside chunks, not as a chunk itself.
-  - **Payload shape:** the `RoutingDecision.signals` dict (Phase 1 D-03) — identical content to what `Done.routing_signals` already carries.
-  - **Belt-and-suspenders contract test:** assert the `routing_decision` event arrives within 100ms of the turn POST AND that its payload equals `Done.routing_signals` byte-for-byte. `Done.routing_signals` remains the canonical persistence source (Phase 3 STORE-02 / D-04); the early SSE event is for UX freshness only.
+  - **Payload shape (revised 2026-05-19 during plan-checker iteration 1):** the FULL routing-chip contract — `{backend, model_or_agent, rationale, confidence, signals}` sourced from `RoutingDecision`'s top-level fields plus the `signals` telemetry sub-dict (Phase 1 D-03). The earlier wording ("payload IS the signals dict") was reconciled when the chip integration revealed the chip needs `backend`/`model_or_agent`/`rationale` to render its "Routed to … · …" text; `RoutingDecision.signals` alone is telemetry (task_type, agentic_intent, rule_fired) and does not contain those fields.
+  - **Belt-and-suspenders contract test:** assert the `routing_decision` event arrives within 100ms of the turn POST AND that the parsed payload's `signals` sub-field equals `Done.routing_signals` byte-for-byte. `Done.routing_signals` remains the canonical persistence source (Phase 3 STORE-02 / D-04); the early SSE event is for UX freshness only. The byte-for-byte equality moved from the whole payload to the `signals` sub-field as part of the reconciliation above.
   - **Phase 3 amendment scope:** edit `apps/api/routes/turn.py` only. Add the new event to Phase 3's REQUIREMENTS.md API-02 wording (or document the extension inline in Phase 4's CONTEXT — planner decides which).
-  - **Phase 4 contract:** the proxy translates `event: routing_decision` to an AI SDK v5 "data part" that the assistant-ui chip component subscribes to via `useThreadMessage`'s metadata.
+  - **Phase 4 contract:** the proxy translates `event: routing_decision` to an AI SDK v6 `data-routing` part that the assistant-ui chip component subscribes to via `useThreadMessage`'s parts.
 
 ### First-Run Modal & Key Setup
 
