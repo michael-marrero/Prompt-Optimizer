@@ -1,15 +1,18 @@
-// Plan 04-05 Wave 4 — ChatBubble.
+// Plan 04-05 Wave 4 — ChatBubble. Plan 04-06 Wave 5 modification:
+// assistant variant mounts MarkdownRenderer in place of the open children
+// slot; props interface grew isStreamingComplete + messageId.
 //
 // UI-SPEC §8 — the visible shell that wraps every chat message. Assistant
 // variant has a hover-revealed action row (Copy + Regenerate per D-14);
 // user variant has no action row. Both share the same container shape.
 //
-// Slot contract: the `children` prop is the message body. Plan 05 mounts
-// a plain pre-formatted text node here (callers pass {<MessagePrimitive.Content />}
-// or any other React node). Plan 06 (markdown wave) replaces the VALUE of
-// the children slot — NOT a marker comment — with the memoized
-// MarkdownRenderer. The ChatBubble's prop interface is the seam Plan 06
-// extends with `isStreamingComplete` + `messageId`.
+// Slot contract (post Plan 06): the assistant variant renders
+//   <MarkdownRenderer rawMarkdown={rawMarkdown} isStreamingComplete={...}
+//                     messageId={...} />
+// The `children` prop remains in the interface for forward-compat (Phase 5's
+// CodeBubble / ComputerUseBubble may pass a custom node), but the default
+// rendering path is the markdown renderer. The user variant still renders
+// `{children}` because user messages are not markdown-rendered.
 //
 // Action row (UI-SPEC §8.3):
 //   - Copy: copies the RAW markdown source from `rawMarkdown` to the
@@ -33,24 +36,34 @@ import type { ReactNode } from "react";
 import { Copy, RefreshCw } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/cn";
+import { MarkdownRenderer } from "./MarkdownRenderer";
 
 export interface ChatBubbleProps {
   /** "assistant" gets the action row + slate-50 background;
    *  "user" gets ml-auto + slate-100, no action row. */
   role: "assistant" | "user";
   /** The raw markdown source text. Copy writes this to the clipboard
-   *  (NOT the rendered HTML). The user variant doesn't render the
-   *  action row so this prop is functionally only consumed by the
-   *  assistant variant, but the type is the same for symmetry. */
+   *  (NOT the rendered HTML). The assistant variant also feeds this
+   *  string to MarkdownRenderer for the rendered body. */
   rawMarkdown: string;
+  /** Plan 04-06: true when the assistant message has finished streaming.
+   *  Used by the assistant variant to gate one-shot syntax highlighting on
+   *  fenced code blocks (forwarded to MarkdownRenderer → StreamingCodeBlock).
+   *  Optional with default false so existing call sites (e.g. user-variant
+   *  tests that never set it) keep compiling. */
+  isStreamingComplete?: boolean;
+  /** Plan 04-06: the assistant message id. Forwarded to MarkdownRenderer
+   *  for its React.memo equality predicate. Optional with default ""
+   *  for backward compatibility with the user-variant tests. */
+  messageId?: string;
   /** Invoked when Regenerate is clicked (assistant variant only).
    *  Plan 05's page.tsx wires this to assistant-ui's reload(). */
   onRegenerate?: () => void;
-  /** The body slot. Plan 05 passes a pre-formatted text node or
-   *  <MessagePrimitive.Content />; Plan 06 swaps it for
-   *  <MarkdownRenderer rawMarkdown=... /> without changing the
-   *  surrounding bubble shell. */
-  children: ReactNode;
+  /** Forward-compat body slot. Phase 5's CodeBubble / ComputerUseBubble
+   *  may pass a custom React node; the default Phase 4 assistant variant
+   *  renders MarkdownRenderer(rawMarkdown) and IGNORES this prop. The
+   *  user variant still renders `{children}` (no markdown). */
+  children?: ReactNode;
 }
 
 const assistantContainerClass =
@@ -66,6 +79,8 @@ const actionButtonClass =
 export function ChatBubble({
   role,
   rawMarkdown,
+  isStreamingComplete = false,
+  messageId = "",
   onRegenerate,
   children,
 }: ChatBubbleProps): React.JSX.Element {
@@ -85,9 +100,21 @@ export function ChatBubble({
     }
   }
 
+  // Plan 04-06: mount the memoized MarkdownRenderer in the assistant
+  // bubble. Phase 5's CodeBubble / ComputerUseBubble may bypass this
+  // by setting children (forward-compat); for Phase 4 the markdown
+  // renderer is the only path.
+  const body = children ?? (
+    <MarkdownRenderer
+      rawMarkdown={rawMarkdown}
+      isStreamingComplete={isStreamingComplete}
+      messageId={messageId}
+    />
+  );
+
   return (
     <div className={assistantContainerClass}>
-      {children}
+      {body}
       <div
         className={cn(
           "absolute bottom-2 right-2 flex items-center gap-1",

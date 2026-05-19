@@ -31,6 +31,7 @@ import {
   ThreadPrimitive,
   ComposerPrimitive,
   MessagePrimitive,
+  useMessage,
   useMessageRuntime,
 } from "@assistant-ui/react";
 import { useChatThread } from "@/hooks/useChatThread";
@@ -54,10 +55,44 @@ function UserMessage(): React.JSX.Element {
   );
 }
 
+// Minimal structural shape of the message state useMessage() returns.
+// Plan 05 SUMMARY established that v0.14.5 exposes the raw ThreadMessage
+// with a `content` array (not a wrapped MessageState.parts). We read it
+// directly here to compute (a) the rawMarkdown string from text parts and
+// (b) the isStreamingComplete signal — both via the `data-metrics` part
+// presence (Plan 02 contract: data-metrics is emitted ONLY on Done, so
+// presence means the stream is complete) AND the `status.type` field
+// (assistant-ui's canonical signal). We use status.type when available
+// and fall back to the data-metrics check for runtimes where status is
+// absent during the render.
+type PartLike = { readonly type: string };
+type TextPartLike = { readonly type: "text"; readonly text: string };
+type DataPartLike = {
+  readonly type: "data";
+  readonly name?: string;
+};
+type MessageStateShape = {
+  readonly id?: string;
+  readonly content?: ReadonlyArray<PartLike>;
+  readonly status?: { readonly type?: string };
+};
+function isTextPart(p: PartLike): p is TextPartLike {
+  return p.type === "text";
+}
+function isMetricsPart(p: PartLike): p is DataPartLike {
+  return p.type === "data" && (p as { name?: string }).name === "metrics";
+}
+
 // Renders the body of an assistant-role message: the RoutingChip ABOVE,
 // the ChatBubble shell wrapping the streamed content, and the
 // MetricsFooter BELOW. Regenerate is wired LIVE to the assistant-ui
 // reload action (Blocker 3 fix — no TODO stub, no console.warn).
+//
+// Plan 04-06 Wave 5: extracts `rawMarkdown` from the message's text parts
+// AND computes `isStreamingComplete` from the message status / data-metrics
+// presence; both flow into ChatBubble → MarkdownRenderer → StreamingCodeBlock
+// so fenced code blocks render plain <pre> during streaming and highlight
+// exactly once on Done (RESEARCH §Pattern 5b + Pitfall 5).
 function AssistantMessage(): React.JSX.Element {
   // useMessageRuntime returns the runtime for the CURRENT message — the
   // one this component is mounted under. Calling .reload() issues a fresh
@@ -70,6 +105,20 @@ function AssistantMessage(): React.JSX.Element {
     messageRuntime.reload();
   };
 
+  // Subscribe to the message state for rawMarkdown extraction +
+  // isStreamingComplete derivation. Plan 04-05 SUMMARY confirmed that
+  // useMessage() returns the raw ThreadMessage with a `content` array.
+  const message = useMessage({ optional: true }) as MessageStateShape | null;
+  const messageId = message?.id ?? "";
+  const textParts = (message?.content ?? []).filter(isTextPart);
+  const rawMarkdown = textParts.map((p) => p.text).join("");
+  // Two-source isStreamingComplete signal — primary via assistant-ui's
+  // status.type === "complete"; fallback via data-metrics part presence
+  // (Plan 02 translator emits data-metrics only on Done).
+  const hasMetricsPart = (message?.content ?? []).some(isMetricsPart);
+  const statusComplete = message?.status?.type === "complete";
+  const isStreamingComplete = statusComplete || hasMetricsPart;
+
   return (
     <div className="mb-6">
       <div className="mb-2">
@@ -77,17 +126,11 @@ function AssistantMessage(): React.JSX.Element {
       </div>
       <ChatBubble
         role="assistant"
-        rawMarkdown=""
+        rawMarkdown={rawMarkdown}
+        isStreamingComplete={isStreamingComplete}
+        messageId={messageId}
         onRegenerate={handleRegenerate}
-      >
-        {/* Plan 06 replaces this children slot's VALUE with the memoized
-            MarkdownRenderer. Plan 05 mounts MessagePrimitive.Content as
-            a pre-formatted text node so the chat surface is observable
-            during smoke testing. */}
-        <div className="whitespace-pre-wrap text-slate-900">
-          <MessagePrimitive.Content />
-        </div>
-      </ChatBubble>
+      />
       <MetricsFooter />
     </div>
   );
