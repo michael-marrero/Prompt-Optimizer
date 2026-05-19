@@ -33,9 +33,10 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 // FASTAPI_URL is read here ONLY — it must never be re-exported to a lib
-// or component file, and there must never be a NEXT_PUBLIC_FASTAPI_URL
-// variant anywhere in the repo (Plan 07's browser-isolation.spec.ts
-// enforces zero outbound browser requests to localhost:8000).
+// or component file, and there must never be a browser-exposed prefixed
+// variant of this var (NEXT-style public env) anywhere in the repo
+// (Plan 07's browser-isolation.spec.ts enforces zero outbound browser
+// requests to the upstream FastAPI port directly).
 const FASTAPI_URL = process.env.FASTAPI_URL ?? "http://localhost:8000";
 
 export async function POST(req: Request) {
