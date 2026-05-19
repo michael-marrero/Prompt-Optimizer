@@ -842,3 +842,192 @@ async def test_unknown_thread_returns_404(
     assert body["detail"] == "thread not found", (
         f"detail should be 'thread not found'; got {body}"
     )
+
+
+# ---------------------------------------------------------------------
+# Test 10 — D-15 routing_decision SSE event (Plan 04-04 contract)
+# ---------------------------------------------------------------------
+
+
+async def test_routing_decision_event_arrives_first_and_matches_done(
+    monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    """D-15 contract: routing_decision event arrives FIRST with the
+    structured 5-key payload, and ``payload['signals']`` equals
+    ``Done.routing_signals`` byte-for-byte.
+
+    Plan 04-04 amends ``apps/api/routes/turn.py`` so the event_stream
+    generator yields a ``routing_decision`` named SSE event as its FIRST
+    yield, BEFORE the adapter.stream() loop. The payload is the
+    STRUCTURED 5-key record sourced from ``decision``:
+
+        {backend, model_or_agent, rationale, confidence, signals}
+
+    The chip in Plan 05 needs ``backend`` (for color), ``model_or_agent``
+    (for display_name lookup), ``rationale`` (for the chip body +
+    tooltip), and ``confidence``. The ``signals`` SUB-FIELD preserves
+    the byte-for-byte equality with ``Done.routing_signals`` that D-15
+    (the persistence-source guarantee) requires.
+
+    Four independent assertions:
+      (a) first event on the wire is ``routing_decision``
+      (b) it arrives within 500ms (ASGITransport latency bound — the
+          100ms target is for real-network; ASGITransport has no
+          network)
+      (c) parsed payload has EXACTLY the 5 keys
+          {backend, model_or_agent, rationale, confidence, signals}
+          with the expected values
+      (d) ``routing_payload['signals']`` equals
+          ``done_payload['routing_signals']`` byte-for-byte
+    """
+
+    app = _fresh_app(monkeypatch, tmp_path)
+
+    from apps.api.backends.chunks import Done, TextDelta
+    from apps.api.tests.fake_adapter import FakeStreamingAdapter
+
+    # decide() returns these signals; the new event's payload['signals']
+    # MUST mirror them, and Done.routing_signals MUST also equal them.
+    # Realistic Phase-1 signals shape (task_type / agentic_intent /
+    # rule_fired) so byte-for-byte test catches any truncation.
+    test_signals = {
+        "task_type": "chat",
+        "task_type_confidence": 0.92,
+        "agentic_intent": False,
+        "agentic_intent_confidence": 0.05,
+        "rule_fired": "default",
+    }
+
+    # Expected 5 fields the event payload MUST carry verbatim.
+    expected_backend = "openrouter"
+    expected_model = "openai/gpt-5"
+    expected_rationale = "test routing"
+    expected_confidence = 0.9
+
+    fake = FakeStreamingAdapter(
+        [
+            TextDelta(text="hi"),
+            Done(
+                tokens_in=1,
+                tokens_out=1,
+                cost_usd=0.001,
+                latency_ms=10,
+                routing_signals=test_signals,
+            ),
+        ]
+    )
+    app.state.adapters = {"openrouter": fake}
+
+    from src.routing.schema import RoutingDecision
+
+    def fake_decide(*args, **kwargs):
+        return RoutingDecision(
+            backend=expected_backend,
+            model_or_agent=expected_model,
+            rationale=expected_rationale,
+            confidence=expected_confidence,
+            signals=test_signals,
+        )
+
+    monkeypatch.setattr("apps.api.routes.turn.decide", fake_decide)
+
+    async with app.router.lifespan_context(app):
+        async with httpx.AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test"
+        ) as client:
+            thread_id = await _create_thread(client)
+            t0 = time.monotonic()
+            first_event_t: float | None = None
+            events: list[tuple[str, str]] = []  # (event, data)
+            current_event: str | None = None
+
+            async with client.stream(
+                "POST",
+                f"/api/v1/threads/{thread_id}/turn",
+                json={"message": "hello"},
+            ) as resp:
+                assert resp.status_code == 200, (
+                    f"POST returned {resp.status_code}: "
+                    f"{await resp.aread()!r}"
+                )
+                async for line in resp.aiter_lines():
+                    if line.startswith("event:"):
+                        current_event = line.split(":", 1)[1].strip()
+                        if first_event_t is None:
+                            first_event_t = time.monotonic()
+                    elif (
+                        line.startswith("data:")
+                        and current_event is not None
+                    ):
+                        # split(":", 1) preserves JSON colons in the
+                        # data payload.
+                        events.append(
+                            (current_event, line.split(":", 1)[1].strip())
+                        )
+                        if current_event == "done":
+                            # Pitfall 4 finite consume.
+                            break
+
+    # ---- Assertion (a): first event is routing_decision ----
+    assert len(events) > 0, "expected at least one SSE event"
+    assert events[0][0] == "routing_decision", (
+        f"first event was {events[0][0]!r}, expected "
+        f"'routing_decision' — D-15 amendment requires the chip data "
+        f"to arrive on the wire BEFORE any text_delta or other chunk"
+    )
+
+    # ---- Assertion (b): arrived within 500ms ----
+    # ASGITransport has no real network — 500ms is generous headroom
+    # for monkeypatch + lifespan setup. Real-network target is 100ms.
+    assert first_event_t is not None
+    assert (first_event_t - t0) < 0.5, (
+        f"first event landed {(first_event_t - t0) * 1000:.1f}ms after "
+        f"POST; D-15 ASGITransport latency bound is 500ms"
+    )
+
+    # ---- Assertion (c): 5-key structured payload ----
+    routing_payload = json.loads(events[0][1])
+    assert set(routing_payload.keys()) == {
+        "backend",
+        "model_or_agent",
+        "rationale",
+        "confidence",
+        "signals",
+    }, (
+        f"routing_decision payload must have exactly the 5 keys "
+        f"{{backend, model_or_agent, rationale, confidence, signals}}; "
+        f"got {set(routing_payload.keys())}"
+    )
+    assert routing_payload["backend"] == expected_backend, (
+        f"payload['backend'] mismatch: "
+        f"{routing_payload['backend']!r} vs {expected_backend!r}"
+    )
+    assert routing_payload["model_or_agent"] == expected_model, (
+        f"payload['model_or_agent'] mismatch: "
+        f"{routing_payload['model_or_agent']!r} vs {expected_model!r}"
+    )
+    assert routing_payload["rationale"] == expected_rationale, (
+        f"payload['rationale'] mismatch: "
+        f"{routing_payload['rationale']!r} vs {expected_rationale!r}"
+    )
+    assert routing_payload["confidence"] == expected_confidence, (
+        f"payload['confidence'] mismatch: "
+        f"{routing_payload['confidence']!r} vs "
+        f"{expected_confidence!r}"
+    )
+
+    # ---- Assertion (d): byte-for-byte equality of signals sub-field ----
+    # Done.routing_signals remains the canonical persistence source
+    # (Phase 3 STORE-02). The early routing_decision event is for UX
+    # freshness; this assertion proves the chip and the persisted
+    # row share a single truth — no drift possible.
+    done_event = next((e for e in events if e[0] == "done"), None)
+    assert done_event is not None, "expected a terminal done event"
+    done_payload = json.loads(done_event[1])
+    assert routing_payload["signals"] == done_payload["routing_signals"], (
+        f"signals sub-field must equal Done.routing_signals "
+        f"byte-for-byte (D-15 canonical-persistence equality);\n"
+        f"  routing_payload['signals'] = {routing_payload['signals']!r}\n"
+        f"  done_payload['routing_signals'] = "
+        f"{done_payload['routing_signals']!r}"
+    )
