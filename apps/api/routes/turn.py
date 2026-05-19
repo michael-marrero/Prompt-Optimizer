@@ -132,6 +132,7 @@ Cross-refs:
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import secrets
 from typing import Any, Literal
@@ -460,6 +461,28 @@ async def post_turn(
         buffer THEN re-raises so the upstream adapter's CancelledError
         handler closes the provider connection (Pattern 7 + PEP 789).
         """
+
+        # D-15 (Phase 4): emit routing_decision event BEFORE adapter dispatch
+        # so the UI chip renders within ~100ms of POST, well before the
+        # first text_delta. ChatChunk union is NOT modified — this event
+        # is yielded alongside ChatChunks via the same SSE pipeline.
+        # Payload is the structured 5-key record {backend, model_or_agent,
+        # rationale, confidence, signals}; payload['signals'] equals
+        # Done.routing_signals byte-for-byte (contract test in
+        # test_turn_streaming.py::test_routing_decision_event...).
+        # Yield happens BEFORE the try/except so a cancellation between
+        # adapter creation and adapter.stream() still ships the chip data.
+        payload = {
+            "backend": decision.backend,
+            "model_or_agent": decision.model_or_agent,
+            "rationale": decision.rationale,
+            "confidence": decision.confidence,
+            "signals": decision.signals,
+        }
+        yield ServerSentEvent(
+            event="routing_decision",
+            data=json.dumps(payload),
+        )
 
         buffer: list[ChatChunk] = []
         start_t = asyncio.get_event_loop().time()
