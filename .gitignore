@@ -44,3 +44,6 @@ apps/web/coverage/
 apps/web/playwright-report/
 apps/web/test-results/
 apps/web/.env.local
+
+# pnpm content-addressable cache (pnpm 11 default in-repo store)
+.pnpm-store/
