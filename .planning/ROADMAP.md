@@ -15,7 +15,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [x] **Phase 1: Router Brain Foundation** - Pure `src/routing/decide()` with calibrated classifiers, agentic-intent head, OOD sentinel, and a hand-labeled routing canary eval
 - [ ] **Phase 2: Backend Adapters & ChatChunk Contract** - Three backend adapters (OpenRouter, Claude Code, computer-use) emitting `ChatChunk` streams with cost caps and key-redaction baked in
 - [ ] **Phase 3: FastAPI Service & Persistent Storage** - HTTP/SSE service joining router + adapters, with `aiosqlite` thread/message/routing-decision persistence
-- [ ] **Phase 4: Minimal Chat UI (OpenRouter Backend)** - Next.js single-backend chat that proves the browser → Next → FastAPI → OpenRouter SSE pipe end-to-end
+- [x] **Phase 4: Minimal Chat UI (OpenRouter Backend)** - Next.js single-backend chat that proves the browser → Next → FastAPI → OpenRouter SSE pipe end-to-end (completed 2026-05-19)
 - [ ] **Phase 5: Feature-Complete Chat UI** - Sidebar, settings, override, routing chip, code/computer-use bubbles, status dots, feedback log — all three backends live
 - [ ] **Phase 6: Open-Source Release Hardening** - `make setup`, README golden path, fresh-clone UAT, Playwright E2E, computer-use threat model, packaging polish
 
@@ -134,6 +134,6 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6
 | 1. Router Brain Foundation | 8/8 | Complete | 2026-05-14 |
 | 2. Backend Adapters & ChatChunk Contract | 6/8 | In Progress|  |
 | 3. FastAPI Service & Persistent Storage | 3/7 | In Progress|  |
-| 4. Minimal Chat UI (OpenRouter Backend) | 0/TBD | Not started | - |
+| 4. Minimal Chat UI (OpenRouter Backend) | 7/7 | Complete   | 2026-05-19 |
 | 5. Feature-Complete Chat UI | 0/TBD | Not started | - |
 | 6. Open-Source Release Hardening | 0/TBD | Not started | - |
