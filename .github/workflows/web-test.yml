@@ -1,0 +1,57 @@
+name: Web Tests
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "apps/web/**"
+      - "apps/api/**"
+      - ".github/workflows/web-test.yml"
+  pull_request:
+    paths:
+      - "apps/web/**"
+      - "apps/api/**"
+      - ".github/workflows/web-test.yml"
+
+jobs:
+  web-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        # No `with: lfs: true` — apps/web/ has no LFS-tracked files.
+
+      - uses: pnpm/action-setup@v3
+        with:
+          version: 9
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "pnpm"
+          cache-dependency-path: apps/web/pnpm-lock.yaml
+
+      # uv needed because the mock-fastapi.py webServer imports fastapi +
+      # sse-starlette from the root pyproject.toml.
+      - uses: astral-sh/setup-uv@v3
+        with:
+          enable-cache: true
+
+      - name: Install Python 3.11
+        run: uv python install 3.11
+
+      - name: Sync Python dependencies (locked)
+        run: uv sync --locked
+
+      - name: Install JS dependencies (frozen lockfile)
+        run: pnpm --dir apps/web install --frozen-lockfile
+
+      - name: Install Playwright Chromium
+        run: pnpm --dir apps/web exec playwright install --with-deps chromium
+
+      - name: Vitest (unit + component)
+        run: pnpm --dir apps/web test
+
+      - name: Playwright E2E (mock FastAPI — no OpenRouter key needed)
+        env:
+          USE_MOCK_FASTAPI: "1"
+        run: pnpm --dir apps/web test:e2e
