@@ -35,10 +35,13 @@ import {
   useMessageRuntime,
 } from "@assistant-ui/react";
 import { useChatThread } from "@/hooks/useChatThread";
+import { useFirstRunGate } from "@/hooks/useFirstRunGate";
 import { ChatBubble } from "@/components/ChatBubble";
 import { RoutingChip } from "@/components/RoutingChip";
 import { MetricsFooter } from "@/components/MetricsFooter";
 import { EmptyState } from "@/components/EmptyState";
+import { FirstRunModal } from "@/components/FirstRunModal";
+import { NetworkDownBanner } from "@/components/NetworkDownBanner";
 
 // Renders the body of a user-role message: just the bubble with no
 // action row + the underlying MessagePrimitive.Content (which Plan 06
@@ -138,13 +141,21 @@ function AssistantMessage(): React.JSX.Element {
 
 export default function ChatPage(): React.JSX.Element {
   const { runtime, threadId } = useChatThread();
+  // Plan 04-07 Wave 6 — the boot-time key gate. Drives:
+  //   - FirstRunModal open state (open={needsKey})
+  //   - composer disabled state (disabled={composerDisabled || needsKey})
+  // Network-down is the SEPARATE surface: NetworkDownBanner polls
+  // /api/health on its own 5s timer and surfaces the §17 string when
+  // the proxy can't reach uvicorn. The first-run gate stays
+  // {isReady:false, needsKey:false} in that case so the modal does NOT
+  // open on every transient outage.
+  const { needsKey } = useFirstRunGate();
+
   // Until the default thread id is loaded (or auto-created on first run),
   // the chat route handler rejects with 400 ("threadId is required").
-  // Disable the composer textarea/Send while threadId is null so the user
-  // can't accidentally send a doomed request. Plan 07's first-run modal
-  // wraps this with a key-missing gate; here we only address the
-  // hydration race between mount and the /api/threads round-trip.
-  const composerDisabled = threadId === null;
+  // Plan 07 layers on top: also disable when the user has no key set
+  // (needsKey === true), so the composer is doubly-gated.
+  const composerDisabled = threadId === null || needsKey;
 
   return (
     <div className="flex flex-col h-screen">
@@ -161,6 +172,12 @@ export default function ChatPage(): React.JSX.Element {
           <Settings className="h-5 w-5" />
         </Link>
       </header>
+
+      {/* First-run modal — Plan 04-07. Pitfall 9 prevention (no Escape /
+          outside-click dismiss) lives inside FirstRunModal itself.
+          Returns null when open=false so this is zero-overhead in the
+          happy path. */}
+      <FirstRunModal open={needsKey} />
 
       {/* Main message area — fills remaining vertical space; Composer is
           rendered inside Thread.Root so assistant-ui can wire it up. */}
@@ -181,6 +198,10 @@ export default function ChatPage(): React.JSX.Element {
               </div>
             </ThreadPrimitive.Viewport>
 
+            {/* NetworkDownBanner sits ABOVE the composer (UI-SPEC §13).
+                Renders nothing when /api/health is reachable. */}
+            <NetworkDownBanner />
+
             {/* Composer — sticky bottom, UI-SPEC §9. The Cancel primitive
                 is automatically wired by useChatRuntime to runtime.stop()
                 so partial preservation works out-of-the-box. */}
@@ -193,6 +214,7 @@ export default function ChatPage(): React.JSX.Element {
                 />
                 <ComposerPrimitive.Send
                   aria-label="Send message"
+                  disabled={composerDisabled}
                   className="inline-flex h-9 w-9 items-center justify-center rounded-md bg-slate-900 text-white hover:bg-slate-800 disabled:bg-slate-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-900 focus-visible:ring-offset-2"
                 >
                   Send

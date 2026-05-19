@@ -62,13 +62,47 @@ _CANNED_SIGNALS = {
 }
 
 
+# ----------------------------------------------------------------------------
+# Plan 07 [fixture:missing-key] — module-level state flag.
+#
+# missing-key is conceptually a HEALTHZ-state fixture, not a turn-body fixture.
+# The body-prefix mechanism applies to /turn fixtures (slow + auth-failed); for
+# first-run.spec.ts we simply boot the mock with NO key set (initial False)
+# and the healthz handler reports openrouter.status="missing_key" until a
+# PATCH /api/v1/settings arrives with any non-empty openrouter key. Then we
+# flip the flag and subsequent healthz polls report "ready" — which lets the
+# Next /api/health proxy return success and useFirstRunGate flips needsKey
+# to false (D-19 post-entry unblock).
+#
+# NOTE: this is in-process module state. Playwright workers=1 + the
+# reuseExistingServer:false config (CI path) ensures one test does NOT see
+# another test's state. For multi-spec local runs we add a reset endpoint
+# below so each spec can explicitly clear the state at its start.
+# ----------------------------------------------------------------------------
+_has_openrouter_key = False
+
+
 @app.get("/api/v1/healthz")
 async def healthz() -> dict:
-    """Stub adapter-status endpoint — mirrors apps/api/routes/health.py shape."""
+    """Adapter-status endpoint — mirrors apps/api/routes/health.py shape.
+
+    Plan 07 [fixture:missing-key] state machine: openrouter.status reflects
+    the module-level _has_openrouter_key flag. The other adapters are
+    pinned to their Plan 01 defaults (claude_code missing, computer_use
+    opt_out) since Phase 4 only exercises openrouter.
+    """
+    openrouter_status: dict[str, str]
+    if _has_openrouter_key:
+        openrouter_status = {"status": "ready"}
+    else:
+        openrouter_status = {
+            "status": "missing_key",
+            "reason": "OPENROUTER_API_KEY not set",
+        }
     return {
-        "ok": True,
+        "status": "ok" if _has_openrouter_key else "degraded",
         "adapters": {
-            "openrouter": {"status": "ready"},
+            "openrouter": openrouter_status,
             "claude_code": {"status": "missing_key"},
             "computer_use": {"status": "opt_out"},
         },
@@ -82,13 +116,42 @@ async def create_thread() -> dict:
 
 
 @app.patch("/api/v1/settings")
-async def patch_settings() -> dict:
-    """Pretend the key save worked; return only the masked form."""
+async def patch_settings(request: Request) -> dict:
+    """Pretend the key save worked; flip the missing-key state flag.
+
+    Plan 07: any non-empty openrouter key in the request body flips the
+    module-level _has_openrouter_key flag to True, so subsequent
+    /api/v1/healthz polls report adapters.openrouter.status="ready" and
+    the first-run modal closes.
+    """
+    global _has_openrouter_key
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    if isinstance(body, dict):
+        keys = body.get("keys") if isinstance(body.get("keys"), dict) else {}
+        openrouter_value = keys.get("openrouter") if isinstance(keys, dict) else None
+        if isinstance(openrouter_value, str) and openrouter_value:
+            _has_openrouter_key = True
     return {
         "keys": {
             "openrouter": {"present": True, "masked": "sk-or-…ABC"},
         }
     }
+
+
+@app.post("/__reset")
+async def reset_state() -> dict:
+    """Test helper — resets the module-level missing-key flag.
+
+    Useful for local multi-spec runs where the Playwright `webServer` is
+    reused across tests (reuseExistingServer=true). first-run.spec.ts hits
+    this endpoint at test start to guarantee a fresh missing-key state.
+    """
+    global _has_openrouter_key
+    _has_openrouter_key = False
+    return {"reset": True}
 
 
 def _resolve_fixture(body: dict[str, Any]) -> tuple[str, str]:
@@ -188,6 +251,74 @@ async def _emit_code_block_fixture():
     yield _emit_done(tokens_in=7, tokens_out=30, cost_usd=0.0005, latency_ms=200)
 
 
+async def _emit_slow_fixture():
+    """Plan 07 fixture — slow stream for cancel-budget.spec.ts.
+
+    Emits one text_delta every 500ms for up to 10 seconds, then Done.
+    The slow path MUST honor client disconnect — the surrounding
+    try/except asyncio.CancelledError lets Playwright's abort
+    propagate cleanly so cancel-budget.spec.ts can measure the full
+    chain (Phase 3 D-09: 2s budget end-to-end across browser → Next →
+    upstream).
+
+    Uses the STRUCTURED 5-key routing_decision payload (Plan 04 D-15).
+    """
+    yield _emit_routing_decision()
+    try:
+        for i in range(20):  # 20 * 500ms = 10 seconds max
+            await asyncio.sleep(0.5)
+            yield {
+                "event": "text_delta",
+                "data": json.dumps(
+                    {"type": "text_delta", "text": f"chunk-{i} "}
+                ),
+            }
+        yield _emit_done(
+            tokens_in=5, tokens_out=20, cost_usd=0.001, latency_ms=10000
+        )
+    except asyncio.CancelledError:
+        # Client (Next proxy) disconnected — stop emitting. Re-raise so
+        # the EventSourceResponse closes the connection cleanly. This is
+        # the server-side half of the AbortController chain Plan 03 wired.
+        raise
+
+
+async def _emit_auth_failed_fixture():
+    """Plan 07 fixture — auth_failed StreamError for error-banner UAT.
+
+    Emits routing_decision then a stream_error chunk with the
+    closed-vocabulary D-06 code="auth_failed", which StreamErrorBanner
+    catalog maps to "OpenRouter rejected the key. Update it in settings
+    and try again." The Done frame still fires so the AI SDK runtime
+    transitions the message to terminal state.
+    """
+    yield _emit_routing_decision()
+    yield {
+        "event": "stream_error",
+        "data": json.dumps(
+            {
+                "type": "stream_error",
+                "code": "auth_failed",
+                "message": "OpenRouter rejected the key",
+                "retriable": False,
+            }
+        ),
+    }
+    yield _emit_done(
+        tokens_in=0, tokens_out=0, cost_usd=0.0, latency_ms=50
+    )
+
+
+# Dispatch table — fixture name → emitter function. Centralizing this
+# avoids the long if/elif chain in the turn handler and makes it easy to
+# add Plan 08+ fixtures without touching the handler body.
+_FIXTURE_DISPATCH = {
+    "code-block": _emit_code_block_fixture,
+    "slow": _emit_slow_fixture,
+    "auth-failed": _emit_auth_failed_fixture,
+}
+
+
 @app.post("/api/v1/threads/{thread_id}/turn")
 async def turn(thread_id: str, request: Request) -> EventSourceResponse:  # noqa: ARG001
     """Dispatch to a named fixture (Warning 5 — body-prefix mechanism)."""
@@ -197,11 +328,7 @@ async def turn(thread_id: str, request: Request) -> EventSourceResponse:  # noqa
         body = {}
     fixture_name, _stripped = _resolve_fixture(body if isinstance(body, dict) else {})
 
-    if fixture_name == "code-block":
-        event_stream = _emit_code_block_fixture
-    else:
-        event_stream = _emit_default_fixture
-
+    event_stream = _FIXTURE_DISPATCH.get(fixture_name, _emit_default_fixture)
     return EventSourceResponse(event_stream(), ping=15)
 
 
