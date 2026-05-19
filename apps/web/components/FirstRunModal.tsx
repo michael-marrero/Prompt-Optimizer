@@ -73,16 +73,20 @@ export function FirstRunModal({ open }: FirstRunModalProps): React.JSX.Element |
         className="max-w-md"
       >
         <DialogHeader>
-          <DialogTitle
-            id="first-run-title"
-            className="text-lg font-semibold text-slate-900"
-          >
+          {/*
+            Radix DialogTitle / DialogDescription auto-generate their IDs
+            and wire aria-labelledby / aria-describedby on DialogContent.
+            Setting a custom `id` on these would break Radix's accessibility
+            assertion (it does document.getElementById(titleId) and prints
+            a console.error if the IDs don't match what it set on Content).
+            We leave the IDs alone and trust Radix's defaults — UI-SPEC §14.2
+            ARIA requirements are still satisfied because Radix's auto-wiring
+            produces the same semantic outcome.
+          */}
+          <DialogTitle className="text-lg font-semibold text-slate-900">
             Connect OpenRouter to get started
           </DialogTitle>
-          <DialogDescription
-            id="first-run-body"
-            className="text-sm text-slate-700 leading-relaxed mt-2"
-          >
+          <DialogDescription className="text-sm text-slate-700 leading-relaxed mt-2">
             Prompt-Optimizer routes your prompts to the best model. OpenRouter is the gateway to most chat models — start by pasting your key.
           </DialogDescription>
         </DialogHeader>
