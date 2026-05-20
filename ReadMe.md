@@ -1,8 +1,65 @@
 # Prompt Optimizer
 
-A prompt routing project that classifies user queries by task type and prepares them for model routing.
+A quality-first prompt router behind a chat UI. You type into a single chat box; the system silently routes each prompt to the most efficient LLM or agent for the task — Claude Sonnet / GPT-5 / Gemini via OpenRouter for conversational work, Claude Code SDK for build-and-edit coding tasks, Anthropic computer-use for browse-and-act tasks — and streams the response back.
 
-Instead of sending every prompt to the same language model, this project explores a smarter routing pipeline: analyze the prompt, extract useful features, classify the task type, and eventually route the prompt to a model based on performance and cost.
+Two stacks live here:
+
+- **Routing brain** (`src/`) — Python scikit-learn pipeline that trains the calibrated task-type classifier, agentic-intent head, and model router. Exposes a framework-free `decide(prompt, history, artifacts, settings) -> RoutingDecision` callable.
+- **Chat app** (`apps/`) — FastAPI back-end (Python, loads the joblib artifacts in-process) + Next.js front-end (TypeScript, App Router, AI SDK v6 + assistant-ui). Bring-your-own-keys; nothing leaves your local instance.
+
+## Project Status
+
+| Phase | Scope | Status |
+|-------|-------|--------|
+| 1 | Router brain foundation (calibrated classifiers + agentic-intent head + OOD sentinel + canary eval) | Complete |
+| 2 | Backend adapters (OpenRouter, Claude Code, computer-use) + ChatChunk contract | 6/8 plans complete |
+| 3 | FastAPI service + SQLite persistence | 3/7 plans complete |
+| 4 | Minimal chat UI (OpenRouter backend, end-to-end SSE pipe) | Complete — 7/7 plans, 110+ tests passing, UAT verified |
+| 5 | Feature-complete chat UI (all three backends, sidebar, override, feedback) | Not started |
+| 6 | Open-source release hardening (`make setup`, README golden path, threat model, Playwright E2E) | Not started |
+
+Phase 4 ships a single-thread MVP chat against OpenRouter. Multi-thread history, the routing-override slash commands, and all-three-backends UX land in Phase 5; the polished onboarding (cold-clone in <10 minutes, threat model, golden-path screenshots) lands in Phase 6.
+
+---
+
+## Quickstart — chat UI
+
+> Bring your own OpenRouter key. Both servers run locally.
+
+Terminal 1 (FastAPI back-end):
+
+```bash
+uv sync
+uv run uvicorn apps.api.main:app --reload
+```
+
+Terminal 2 (Next.js front-end):
+
+```bash
+pnpm --dir apps/web install
+pnpm --dir apps/web dev
+```
+
+Open http://localhost:3000. The first-run modal will prompt for your OpenRouter key (the key lives in the FastAPI keystore — it never reaches the browser). Once entered, the composer unlocks; submit any prompt and the routing chip + streamed markdown + cost/latency/token footer should render.
+
+---
+
+## Quickstart — routing brain only (no chat UI)
+
+If you only want the offline routing CLI (the trained Python pipeline), skip the Next.js side:
+
+```bash
+uv sync --all-extras
+uv run python -m src.routing.decide "what is the capital of France?"
+```
+
+That prints a `RoutingDecision` JSON `{backend, model_or_agent, rationale, confidence}` for any prompt with no FastAPI dependency.
+
+The legacy interactive REPL is also still wired:
+
+```bash
+uv run python src/demo/demo_router.py
+```
 
 ---
 
@@ -111,7 +168,7 @@ Prompt-Optimizer/
 │   │   └── Feature_extractor.py
 │   │
 │   ├── model_router/
-│   │   ├── build_top_model_dataset.py
+│   │   ├── build_top_model_datatset.py
 │   │   └── train_model_router.py
 │   │
 │   ├── model_router_tier/
@@ -291,8 +348,10 @@ This creates a cleaner target for the model router.
 The builder file is:
 
 ```text 
-src/model_router/build_top_model_dataset.py
+src/model_router/build_top_model_datatset.py
 ```
+
+(Yes, the filename has a typo — `datatset` — that the codebase still depends on. See `CLAUDE.md` § Anti-Patterns.)
 
 The output file is:
 
@@ -543,7 +602,7 @@ python src/model_router_tier/build_router_dataset.py
 ### 7. Build the top-model router dataset
 
 ```bash
-python src/model_router/build_top_model_dataset.py
+python src/model_router/build_top_model_datatset.py
 ```
 ### 8. Train the model router
 
@@ -551,7 +610,8 @@ python src/model_router/build_top_model_dataset.py
 python src/model_router/train_model_router.py
 ```
 
-### . Run the demo router
+### 9. Run the demo router
+
 ```bash
 python src/demo/demo_router.py
 ```
@@ -576,10 +636,13 @@ The project may include saved models and evaluation images for demonstration, bu
 ---
 
 Saved model files:
+
 ```text
-models/task_type_classifier.joblib
-models/tier_router.joblib
-models/model_router.joblib
+models/task_type_classifier.joblib       # Phase 1 — calibrated task-type head
+models/agentic_intent_classifier.joblib  # Phase 1 — conversational vs agentic
+models/model_router.joblib               # Phase 1 — exact model picker
+models/tier_router.joblib                # cheap/medium/strong tier — experimental
+models/embedding_router.joblib           # sentence-transformer experiment
 ```
 Evaluation outputs:
 ```
@@ -601,16 +664,19 @@ Current limitations:
 ---
 Future Work
 
-Future improvements could include:
+Future improvements (some are scoped to upcoming phases):
 
 - Merge overlapping task labels
 - Improve exact model routing with stronger balancing strategies
-- Add confidence calibration
-- Add real OpenRouter API calls for verified routes
-- Add fallback behavior for low-confidence predictions
-- Compare against baselines such as always-cheapest, always-strongest, and random routing
+- ~~Add confidence calibration~~ — delivered in Phase 1 (calibrated task-type + model-router heads via `FrozenEstimator`)
+- ~~Add real OpenRouter API calls for verified routes~~ — delivered in Phase 2 (`apps/api/backends/openrouter`)
+- ~~Add fallback behavior for low-confidence predictions~~ — delivered in Phase 1 (OOD sentinel + low-confidence fallback to configured default)
+- Compare against baselines such as always-cheapest, always-strongest, and random routing (`src/evaluation/evaluate_baselines.py` is partial; expand)
 - Evaluate answer quality after routing, not just routing-label accuracy
-- Add a web interface for interactive prompt routing
+- ~~Add a web interface for interactive prompt routing~~ — delivered in Phase 4 (Next.js chat UI streaming through FastAPI; OpenRouter backend live)
+- Multi-thread sidebar + history restore on navigation (Phase 5)
+- All-three-backends live in the UI: Claude Code SDK for build-and-edit, Anthropic computer-use for browse-and-act (Phase 5)
+- `make setup` script, golden-path demo prompts, fresh-clone UAT, Playwright E2E, threat model (Phase 6)
 
 ---
 
@@ -618,15 +684,23 @@ Future improvements could include:
 
 The current project includes:
 
-- Feature extraction
-- Task type classification
-- Saved task classifier model
-- Router training dataset generation
-- Top-model router dataset generation
-- Model router training
-- Saved model router
-- Simulated demo router
+**Routing brain (Phase 1):**
+
+- Feature extraction (handcrafted + char/word TF-IDF + sentence-transformer experiment)
+- Task type classification (calibrated logistic regression with macro-F1 reporting)
+- Agentic-intent head (conversational vs agentic prompt classification)
+- Saved task classifier, agentic-intent, model-router, tier-router, and embedding-router artifacts
+- Top-model router dataset generation (top-N + `OTHER` bucket)
+- OOD sentinel + low-confidence fallback to the configured default model
+- Hand-labeled routing canary eval (`src/evaluation/evaluate_routing.py`)
 - Evaluation plots and metrics
+- Framework-free `src/routing/decide()` callable for both the CLI demo and the FastAPI service
+
+**Chat app (Phases 2 — 4):**
+
+- Three backend adapters with a single `ChatChunk` discriminated union — `apps/api/backends/{openrouter,claude_code,computer_use}` (Phase 2; 6/8 plans complete)
+- FastAPI service with SQLite persistence, SSE turn endpoint, BYOK keystore, redaction filter — `apps/api/` (Phase 3; 3/7 plans complete)
+- Next.js chat UI on the OpenRouter backend end-to-end — `apps/web/` (Phase 4 complete): first-run modal + key gating, routing chip on every assistant message, streaming markdown with no-flicker code blocks (shiki singleton + memoized renderer), Stop button preserves partial, per-turn metrics footer, browser-to-FastAPI isolation (no `NEXT_PUBLIC_FASTAPI_URL`)
 
 ---
 ## Citation
@@ -645,15 +719,27 @@ This project uses data from `LLMRouterBench`. If you use this project or the ori
 
 ---
 
-## Running the chat UI
+## Project structure (high-level)
 
-Terminal 1 (FastAPI):
-    uv sync
-    uvicorn apps.api.main:app --reload
+```text
+Prompt-Optimizer/
+├── apps/
+│   ├── api/          # FastAPI back-end (Phases 2-3): adapters, routes, keystore, SQLite
+│   └── web/          # Next.js front-end (Phase 4): chat UI, SSE proxy, components, tests
+├── src/
+│   ├── routing/      # Phase 1 routing brain — decide(prompt, ...) -> RoutingDecision
+│   ├── task_classifier/
+│   ├── model_router/
+│   ├── model_router_tier/
+│   ├── feature_extraction/
+│   ├── data/
+│   ├── demo/         # Offline CLI demo (predates the chat app)
+│   └── evaluation/
+├── models/           # joblib artifacts (committed via Git LFS)
+├── data_processed/   # CSVs derived from the LLMRouterBench raw tree
+├── config/
+│   └── model_mapping.json  # benchmark slug -> display_name, provider, tier, api_model
+└── .planning/        # GSD planning artifacts (phases, requirements, roadmap)
+```
 
-Terminal 2 (Next.js):
-    pnpm --dir apps/web install
-    pnpm --dir apps/web dev
-
-Then open http://localhost:3000.
-On first run, paste your OpenRouter key into the modal.
+The detailed component-by-component breakdown earlier in this README still holds for the Python pipeline; the chat-app side is new and documented inline at `apps/api/CONTEXT-equivalent` and the Phase 4 plan/summary files under `.planning/phases/04-*/`.
