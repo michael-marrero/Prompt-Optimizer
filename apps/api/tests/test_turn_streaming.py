@@ -1031,3 +1031,74 @@ async def test_routing_decision_event_arrives_first_and_matches_done(
         f"  done_payload['routing_signals'] = "
         f"{done_payload['routing_signals']!r}"
     )
+
+
+# ---------------------------------------------------------------------
+# Test 11 — Phase 4 UAT gap fix: missing-key adapter ctor returns 400
+# ---------------------------------------------------------------------
+
+
+async def test_missing_anthropic_key_returns_400_not_500(
+    monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    """Adapter constructor RuntimeError surfaces as pre-stream HTTPException(400).
+
+    Phase 4 UAT (2026-05-19) surfaced a blocker: when the Phase 1 router
+    picks ``claude_code`` for a code/long-form prompt and no
+    ANTHROPIC_API_KEY is set, ``ClaudeCodeAdapter.__init__`` raises
+    ``RuntimeError("ANTHROPIC_API_KEY not set …")``. The previous
+    ``_get_or_create_adapter`` try/except only caught ``ImportError``,
+    so the ``RuntimeError`` propagated as a 500 — the Phase 4 UI saw
+    an opaque error, the assistant-message slot stayed empty, and the
+    metrics footer was stuck on ``streaming●`` indefinitely.
+
+    The fix mirrors the existing computer-use opt-out gate (D-12): catch
+    the adapter's missing-key ``RuntimeError`` at construction and
+    re-raise as ``HTTPException(400)`` with a backend-aware detail
+    string the UI can render via ``StreamErrorBanner`` or a toast.
+
+    Assertion contract:
+      (a) status_code == 400 (NOT 500) — the SSE stream never opens
+      (b) detail mentions both the backend name and the required env
+          var name so the user knows WHICH key is missing
+    """
+
+    # Belt-and-suspenders: ensure no real env key bleeds in from the
+    # caller's shell. The adapter's preflight checks os.environ in
+    # addition to the explicit api_key argument.
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+
+    app = _fresh_app(monkeypatch, tmp_path)
+
+    # No pre-registered adapter for claude_code — forces the route to
+    # call _get_or_create_adapter, which constructs a real
+    # ClaudeCodeAdapter (with api_key=keystore.get("anthropic") which
+    # returns None for a fresh keystore), tripping the preflight.
+    app.state.adapters = {}
+
+    async with app.router.lifespan_context(app):
+        async with httpx.AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test"
+        ) as client:
+            thread_id = await _create_thread(client)
+            resp = await client.post(
+                f"/api/v1/threads/{thread_id}/turn",
+                json={
+                    "message": "anything",
+                    "override_backend": "claude_code",
+                },
+            )
+
+    assert resp.status_code == 400, (
+        f"missing ANTHROPIC_API_KEY for routed claude_code backend "
+        f"should return pre-stream 400, not 500 (UAT Gap #1); "
+        f"got {resp.status_code}: {resp.text}"
+    )
+    detail = resp.json().get("detail", "")
+    assert "claude_code" in detail, (
+        f"error detail should name the backend; got {detail!r}"
+    )
+    assert "ANTHROPIC_API_KEY" in detail, (
+        f"error detail should name the missing env var so the user "
+        f"knows what to set; got {detail!r}"
+    )

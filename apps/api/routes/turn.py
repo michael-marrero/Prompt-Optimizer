@@ -305,6 +305,26 @@ async def _get_or_create_adapter(app: Any, backend: str) -> Any:
             status_code=500,
             detail=f"{backend} adapter not available: {exc}",
         )
+    except RuntimeError as exc:
+        # Adapter constructors raise RuntimeError when their required
+        # API key is missing (e.g., ClaudeCodeAdapter.__init__ trips
+        # _missing_api_key_error() when ANTHROPIC_API_KEY is unset).
+        # Convert to a clean pre-stream HTTPException(400) so the Phase
+        # 4 UI receives a usable error response instead of the SSE
+        # stream hanging on a 500 (D-08 HTTPException path; mirrors the
+        # computer-use opt-out gate above).
+        key_label = {
+            "openrouter": "OPENROUTER_API_KEY",
+            "claude_code": "ANTHROPIC_API_KEY",
+            "computer_use": "ANTHROPIC_API_KEY",
+        }.get(backend, "API key")
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"{backend} backend requires {key_label} — "
+                f"add it via PATCH /api/v1/settings or set the env var"
+            ),
+        )
 
     app.state.adapters[backend] = adapter
     return adapter
