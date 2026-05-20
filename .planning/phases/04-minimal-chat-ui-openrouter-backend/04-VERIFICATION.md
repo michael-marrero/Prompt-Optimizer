@@ -1,9 +1,24 @@
 ---
 phase: 04-minimal-chat-ui-openrouter-backend
 verified: 2026-05-19T18:30:00Z
-status: human_needed
+status: pass
+status_history:
+  - 2026-05-19T18:30:00Z: human_needed (5/5 SCs verified by impl; 4 manual UAT items pending)
+  - 2026-05-20T00:30:00Z: pass (UAT 7/7 verified; Gap #1 fix landed in commit 907fa38; Gap #2 deferred to Phase 5 scope)
 score: 5/5
 overrides_applied: 0
+gaps_logged:
+  - id: gap_1
+    severity: blocker
+    scope: phase-4
+    status: fixed
+    fix_commit: 907fa38
+    description: "_get_or_create_adapter only caught ImportError; RuntimeError from missing-key adapter ctor escaped as 500"
+  - id: gap_2
+    severity: minor
+    scope: phase-5
+    status: deferred
+    description: "Conversation history does not restore on /settings → / navigation (Phase 5 owns thread restore on mount)"
 human_verification:
   - test: "Visual no-flicker sanity on a real OpenRouter stream"
     expected: "A Python code block renders as plain <pre><code> during streaming, then shiki highlights once after the closing fence — no visible flash or second highlight pass to the human eye"
