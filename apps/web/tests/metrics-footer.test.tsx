@@ -1,5 +1,14 @@
 // Plan 04-05 Wave 4 — MetricsFooter RTL test suite.
 //
+// TODO(07): reconcile in Plan 07-05 (re-skin). 07-CONTEXT D-05 FOLDS
+// MetricsFooter into the Plasma assistant footer stat row
+// (latency · cost · model.short). These 18 assertions still PASS today
+// (Phase-7 Wave-0 audit, 07-01) because the MetricsFooter component is NOT
+// removed in Wave 0 — it is re-skinned/folded by its owning impl plan. NOT
+// skipped here: deleting this coverage now would drop the UI-07 formatting
+// contract before the fold lands. The owning plan reconciles the selector if
+// the standalone component is absorbed.
+//
 // VALIDATION.md row: "UI-07 unit".
 // Replaces the Plan 01 it.todo stub with real RTL renders.
 //

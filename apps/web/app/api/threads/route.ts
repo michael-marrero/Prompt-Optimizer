@@ -19,6 +19,37 @@ export const dynamic = "force-dynamic"; // mutation endpoint; never cache
 
 const FASTAPI_URL = process.env.FASTAPI_URL ?? "http://localhost:8000";
 
+// GET /api/threads — sidebar thread-list source (UI-02). Pure passthrough
+// to FastAPI `GET /api/v1/threads`, which already orders by `updated_at`
+// DESC (Phase 5 05-01), so no client-side re-sort is needed. The browser
+// never speaks to FastAPI directly (UI-17) — this proxy is the only path.
+//
+// Cross-refs:
+//   - 05-PATTERNS.md apps/web/app/api/threads/route.ts (EXTEND: add GET list)
+//   - apps/web/app/api/health/route.ts (GET passthrough analog)
+//   - apps/api/routes/threads.py (GET /threads list)
+export async function GET(_req: Request) {
+  let upstream: Response;
+  try {
+    upstream = await fetch(`${FASTAPI_URL}/api/v1/threads`);
+  } catch {
+    return Response.json(
+      { error: "API unavailable — is uvicorn running?" },
+      { status: 503 },
+    );
+  }
+
+  if (!upstream.ok) {
+    const text = await upstream.text().catch(() => "");
+    return new Response(text, {
+      status: upstream.status,
+      headers: { "Content-Type": "application/json" },
+    });
+  }
+
+  return Response.json(await upstream.json());
+}
+
 export async function POST(req: Request) {
   // Parse body — fall back to {} so the auto-create call with no body
   // still produces a valid {title:"Untitled"} forward.

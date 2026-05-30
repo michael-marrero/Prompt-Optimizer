@@ -338,6 +338,15 @@ def decide(
         tau_router = float(settings.get("model_router_tau", DEFAULT_MODEL_ROUTER_TAU))
         epsilon = float(settings.get("epsilon", DEFAULT_EPSILON))
 
+        # Phase 7 (07-07) routing preferences — ROUTER-06, quality-first. These
+        # are RECOGNIZED here and APPLIED only to the OpenRouter chat-model pick in
+        # Stage 5. The agentic backend cascade (Stage 3) returns BEFORE Stage 5, so
+        # an agentic task is never downgraded to a cheaper chat backend regardless
+        # of priority / cost_aware_fallback (test_routing_prefs.py ROUTER-06 guard).
+        priority = str(settings.get("priority", "quality")).lower()
+        cost_aware = bool(settings.get("cost_aware_fallback", False))
+        zero_data_retention = bool(settings.get("zero_data_retention", False))
+
         # Empty / whitespace-only prompts have no semantic content; the
         # calibrated heads might still produce a "confident" prediction
         # by sheer prior, but routing a blank prompt to any specific
@@ -469,8 +478,56 @@ def decide(
         # to api_model via choose_final_route (D-02).
         # ----------------------------------------------------------
         model_mapping = artifacts["model_mapping"]
+
+        # Record the prefs on the decision for transparency.
+        signals["priority"] = priority
+        signals["cost_aware_fallback"] = cost_aware
+        signals["zero_data_retention"] = zero_data_retention
+
+        # Candidate set = the top-3 router picks (all quality-comparable per the head).
+        candidates = router_table[:3]
+
+        # ZERO DATA RETENTION (T-07-14): when on, restrict candidates to
+        # retention-eligible providers (model_mapping "zero_data_retention_eligible").
+        # If none of the top picks are eligible, keep the original set rather than
+        # break routing, and flag the gap on the decision.
+        if zero_data_retention:
+            eligible = [
+                row
+                for row in candidates
+                if bool(
+                    model_mapping.get(row[0], {}).get(
+                        "zero_data_retention_eligible", False
+                    )
+                )
+            ]
+            if eligible:
+                candidates = eligible
+            else:
+                signals["zdr_no_eligible_candidate"] = True
+
+        # CR-01 / ROUTING-PREFS-03 — quality-first cost band is FIXED.
+        #
+        # `priority` and `cost_aware_fallback` are recorded above for
+        # transparency but NEVER widen the quality-tied band. The band is
+        # always `DEFAULT_EPSILON` (the per-call `epsilon`, default 0.02):
+        # quality_first_pick treats only candidates within `cost_epsilon` of
+        # the top-1 probability as quality-tied, and cost is the tiebreaker
+        # ONLY among those. Under the LOCKED quality-first constraint
+        # (PROJECT.md, ROUTER-06), a model materially below the top-1 router
+        # confidence is never selected on cost — so for model SELECTION within
+        # OpenRouter these prefs are intentionally inert. (They remain on the
+        # decision so the UI can surface the user's stated preference.) An
+        # earlier revision widened this band to as much as 0.12 (capped 0.25),
+        # which let a model up to 12 points below the top-1 win on cost; that
+        # violated the quality-first invariant and was removed. The regression
+        # test src/routing/tests/test_quality_first_cost_epsilon.py locks the
+        # ceiling so the band can never silently re-widen.
+        cost_epsilon = epsilon
+        signals["cost_epsilon"] = cost_epsilon
+
         chosen_slug = quality_first_pick(
-            router_table[:3], model_mapping, epsilon=epsilon
+            candidates, model_mapping, epsilon=cost_epsilon
         )
         signals["chosen_slug"] = chosen_slug
         signals["tier_tiebreaker_fired"] = (chosen_slug != router_table[0][0])

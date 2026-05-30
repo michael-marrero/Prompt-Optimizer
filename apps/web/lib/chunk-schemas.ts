@@ -147,3 +147,60 @@ export const NamedSSEEventSchema = z.discriminatedUnion("event", [
   z.object({ event: z.literal("done"), data: DoneSchema }),
 ]);
 export type NamedSSEEventT = z.infer<typeof NamedSSEEventSchema>;
+
+// --------------------------------------------------------------------
+// MessageRow / MessagesResponse (Plan 08-02) — the GET
+// /api/threads/{id}/messages payload boundary.
+// --------------------------------------------------------------------
+//
+// One restored row per persisted message. `reconstruct-messages.ts` turns each
+// row into an AI-SDK-v6 `UIMessage` whose parts use the WIRE `data-*` vocabulary
+// (08-RESEARCH §Pattern 1). This Zod schema lets ChatSurface (08-03) parse-
+// validate the fetched payload at the client trust boundary before reconstruction.
+//
+// Field provenance (08-RESEARCH §Pattern 1 / §Pitfall 3):
+//   - `content_blocks` is the ALREADY-PARSED array (the endpoint `json.loads()`es
+//     the `Message.content_blocks` TEXT column server-side; Pitfall 3). Each entry
+//     is a `chunk.model_dump()` dict with a `type` discriminator — kept OPEN
+//     (`{type: string}` + passthrough) so a forward-compat block.type round-trips
+//     instead of failing the whole-row parse (Security §DoS tolerance).
+//   - `routing` is the D-01 LEFT JOIN sub-object: null on user rows and on
+//     assistant rows with no recorded routing decision.
+//   - Every metrics column is nullable (Phase 2 Done allows `int | None = None`
+//     on every field; mirrors `MetricsPayload` / `DoneSchema`).
+
+// A single stored content block — the `chunk.model_dump()` dict. The `type`
+// discriminator is required (it regenerates the `data-<type>` wire name 1:1);
+// every other key is passthrough so unknown/forward-compat fields survive and a
+// novel block.type cannot fail the parse (DoS tolerance — T-08-02-DoS).
+export const ContentBlockSchema = z
+  .object({ type: z.string() })
+  .passthrough();
+export type ContentBlockT = z.infer<typeof ContentBlockSchema>;
+
+// The D-01 routing join sub-object (null when absent).
+export const MessageRoutingSchema = z
+  .object({ rationale: z.string(), override: z.boolean() })
+  .nullable();
+export type MessageRoutingT = z.infer<typeof MessageRoutingSchema>;
+
+// One row from GET /api/threads/{id}/messages.
+export const MessageRowSchema = z.object({
+  id: z.string(),
+  role: z.enum(["user", "assistant"]),
+  text: z.string(),
+  content_blocks: z.array(ContentBlockSchema),
+  backend_used: z.string().nullable(),
+  model_used: z.string().nullable(),
+  cost_usd: z.number().nullable(),
+  latency_ms: z.number().nullable(),
+  tokens_in: z.number().nullable(),
+  tokens_out: z.number().nullable(),
+  status: z.enum(["complete", "error", "cancelled"]),
+  routing: MessageRoutingSchema,
+});
+export type MessageRowT = z.infer<typeof MessageRowSchema>;
+
+// The full response — an ordered array of rows (oldest-first).
+export const MessagesResponseSchema = z.array(MessageRowSchema);
+export type MessagesResponseT = z.infer<typeof MessagesResponseSchema>;

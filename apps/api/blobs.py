@@ -107,9 +107,21 @@ def _is_inside_blobs_dir(path: Path) -> bool:
     naive ``startswith``).
     """
 
+    # Read ``BLOBS_DIR`` off the live ``apps.api.paths`` module rather
+    # than the value bound at import so a ``PROMPT_OPTIMIZER_HOME``
+    # override applied via ``importlib.reload(apps.api.paths)`` in tests
+    # is honored. Falls back to the import-time module global if the
+    # dynamic lookup ever fails (it never does in practice).
+    try:
+        import apps.api.paths as _paths
+
+        blobs_dir = _paths.BLOBS_DIR
+    except Exception:
+        blobs_dir = BLOBS_DIR
+
     try:
         resolved = Path(path).resolve()
-        blobs_resolved = BLOBS_DIR.resolve()
+        blobs_resolved = blobs_dir.resolve()
     except Exception:
         # ``resolve()`` raises on certain malformed paths on Windows.
         # Defensively bail to "not inside" so the unlink does not run.
@@ -136,7 +148,8 @@ def _maybe_externalize_screenshot(chunk: Screenshot) -> Screenshot:
         - decoded byte length >= ``INLINE_THRESHOLD_BYTES``: compute
           sha256, atomically write bytes to
           ``BLOBS_DIR / f"{sha}.{ext}"``, return a new ``Screenshot``
-          with ``image_b64=None`` and ``image_ref=str(target)``.
+          with ``image_b64=None`` and ``image_ref=f"{sha}.{ext}"`` (the
+          bare content KEY, NOT the absolute path — BL-01).
 
     Atomicity (RESEARCH Pattern 10 + Pitfall 11):
         - Idempotent: if the target already exists (same sha256), skip
@@ -180,8 +193,17 @@ def _maybe_externalize_screenshot(chunk: Screenshot) -> Screenshot:
             target,
         )
 
+    # BL-01: store the bare content KEY (``<sha>.<ext>``), not the
+    # absolute filesystem path. The blob-serving endpoint
+    # (``routes/blobs.py:get_blob``) and the React bubble
+    # (``ComputerUseBubble.screenshotSrc``) both contract on the bare
+    # sha stem; an absolute path here interpolated into ``/api/blobs/...``
+    # produces a traversal-shaped URL that the endpoint rejects with a
+    # 404, so every >=256KB screenshot rendered blank. The single
+    # canonical representation is the filename; the cascade-unlink path
+    # in ``db.queries.delete_thread`` re-anchors it to ``BLOBS_DIR``.
     return chunk.model_copy(
-        update={"image_ref": str(target), "image_b64": None}
+        update={"image_ref": f"{sha}.{ext}", "image_b64": None}
     )
 
 
@@ -201,6 +223,14 @@ def _collect_blob_refs_from_content_blocks(
     handler must NEVER raise on a corrupted ``content_blocks`` row —
     the cascade delete should still succeed; we just skip the unlink
     for the unparseable row.
+
+    Representation (BL-01): ``image_ref`` / ``diff_ref`` are stored as
+    the bare content KEY (``<sha>.<ext>``) rather than an absolute path.
+    A relative key is re-anchored to ``BLOBS_DIR`` here so the
+    cascade-unlink resolves to the real file on disk. Absolute paths
+    (legacy rows written before BL-01, or hand-built test fixtures) are
+    passed through verbatim so the ``_is_inside_blobs_dir`` guard still
+    decides their fate.
     """
 
     try:
@@ -214,14 +244,32 @@ def _collect_blob_refs_from_content_blocks(
     if not isinstance(blocks, list):
         return []
 
+    # Read ``BLOBS_DIR`` off the live module (honoring a test-time
+    # ``importlib.reload(apps.api.paths)`` override) — same pattern as
+    # ``_is_inside_blobs_dir``.
+    try:
+        import apps.api.paths as _paths
+
+        blobs_dir = _paths.BLOBS_DIR
+    except Exception:
+        blobs_dir = BLOBS_DIR
+
+    def _to_path(ref: str) -> Path:
+        # Bare content key (``<sha>.<ext>``) → re-anchor under BLOBS_DIR.
+        # Absolute legacy paths are returned unchanged.
+        p = Path(ref)
+        if p.is_absolute():
+            return p
+        return blobs_dir / ref
+
     refs: list[Path] = []
     for block in blocks:
         if not isinstance(block, dict):
             continue
         image_ref = block.get("image_ref")
         if isinstance(image_ref, str) and image_ref:
-            refs.append(Path(image_ref))
+            refs.append(_to_path(image_ref))
         diff_ref = block.get("diff_ref")
         if isinstance(diff_ref, str) and diff_ref:
-            refs.append(Path(diff_ref))
+            refs.append(_to_path(diff_ref))
     return refs

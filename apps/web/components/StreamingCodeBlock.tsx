@@ -50,7 +50,7 @@ export interface StreamingCodeBlockProps {
 }
 
 const PRE_CLASS =
-  "text-sm font-mono leading-relaxed rounded-md overflow-x-auto p-4 my-3 bg-slate-50 border border-slate-200";
+  "text-sm font-mono leading-relaxed rounded-md overflow-x-auto p-4 my-3 bg-[var(--surface-2)] border border-[var(--line)]";
 
 const HIGHLIGHTED_CLASS =
   "text-sm font-mono leading-relaxed rounded-md overflow-x-auto p-4 my-3";

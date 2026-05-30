@@ -44,7 +44,7 @@ import type React from "react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
-import { postSettings } from "@/lib/api-client";
+import { postSettings, type SettingsProvider } from "@/lib/api-client";
 
 export interface KeyFormProps {
   /** "blocking" — used by FirstRunModal; autofocuses the Input and renders
@@ -53,9 +53,26 @@ export interface KeyFormProps {
    *  "Update key" label when the field is empty (the user is replacing an
    *  existing key) and "Save & continue" when typing a new key. */
   mode: "blocking" | "settings";
+  /** Which provider key this form writes (UI-12 §11.1 — one row per provider).
+   *  Defaults to "openrouter" so existing call sites (FirstRunModal + the
+   *  Phase-4 single-section settings page) keep their exact behavior. */
+  provider?: SettingsProvider;
 }
 
-export function KeyForm({ mode }: KeyFormProps): React.JSX.Element {
+// §17 per-provider input placeholder + accessible label.
+const PROVIDER_PLACEHOLDER: Record<SettingsProvider, string> = {
+  openrouter: "sk-or-v1-...",
+  anthropic: "sk-ant-...",
+};
+const PROVIDER_LABEL: Record<SettingsProvider, string> = {
+  openrouter: "OpenRouter API key",
+  anthropic: "Anthropic API key",
+};
+
+export function KeyForm({
+  mode,
+  provider = "openrouter",
+}: KeyFormProps): React.JSX.Element {
   const [value, setValue] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
@@ -65,7 +82,7 @@ export function KeyForm({ mode }: KeyFormProps): React.JSX.Element {
     if (!trimmed || submitting) return;
     setSubmitting(true);
     try {
-      await postSettings("openrouter", trimmed);
+      await postSettings(provider, trimmed);
       toast.success("OpenRouter connected — try a prompt!");
       // Notify the rest of the app — useFirstRunGate listens for this.
       window.dispatchEvent(new CustomEvent("pomu:key-saved"));
@@ -99,8 +116,8 @@ export function KeyForm({ mode }: KeyFormProps): React.JSX.Element {
         type="text"
         value={value}
         onChange={(e) => setValue(e.target.value)}
-        placeholder="sk-or-v1-..."
-        aria-label="OpenRouter API key"
+        placeholder={PROVIDER_PLACEHOLDER[provider]}
+        aria-label={PROVIDER_LABEL[provider]}
         autoComplete="off"
         autoCorrect="off"
         autoCapitalize="off"
@@ -111,7 +128,7 @@ export function KeyForm({ mode }: KeyFormProps): React.JSX.Element {
       <Button
         type="submit"
         disabled={submitting || !value.trim()}
-        className="w-full mt-4 bg-slate-900 text-white hover:bg-slate-800"
+        className="w-full mt-4 bg-[var(--accent)] text-white hover:bg-[var(--accent-hover)]"
       >
         {buttonLabel}
       </Button>

@@ -67,14 +67,14 @@ export interface ChatBubbleProps {
 }
 
 const assistantContainerClass =
-  "bg-slate-50 border border-slate-200 rounded-lg p-4 max-w-prose group relative";
+  "bg-[var(--surface-2)] border border-[var(--line)] rounded-lg p-4 max-w-prose group relative";
 const userContainerClass =
-  "bg-slate-100 border border-slate-200 rounded-lg p-4 max-w-prose ml-auto";
+  "bg-[var(--surface-2)] border border-[var(--line)] rounded-lg p-4 max-w-prose ml-auto";
 
 // Shared action-row button class (Copy + Regenerate) — shadcn focus-ring
 // pattern + hover bg. Size h-7 w-7 matches UI-SPEC §8.3.
 const actionButtonClass =
-  "h-7 w-7 rounded-md hover:bg-slate-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-900 focus-visible:ring-offset-2 inline-flex items-center justify-center text-slate-700";
+  "h-7 w-7 rounded-md hover:bg-[var(--surface-2)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-900 focus-visible:ring-offset-2 inline-flex items-center justify-center text-[var(--ink-2)]";
 
 export function ChatBubble({
   role,

@@ -1,40 +1,33 @@
-// Plan 04-05 Wave 4 — RoutingChip.
+// Plan 07-03 Wave 2 — RoutingChip: Plasma optimized pill (L1) + D-08 neutral override pill.
 //
-// UI-SPEC §6 — the color-coded chip that sits ABOVE every assistant message
-// and announces which backend / model the router picked. UI-04 requires the
-// chip to be visible on every assistant turn — never collapsed, never null
-// when a `data-routing` part exists on the message.
+// L1 (LOCKED): routing is invisible-by-default. The always-visible slate/green/amber
+// chip is REPLACED by a hover/focus-only "optimized" pill. The full rationale is
+// carried on the pill's aria-label / title so AT users and hover users retain access
+// (UI-SPEC §0.3 accessibility caveat).
 //
-// Data path (Plan 02 Wave 1 + Plan 04 Wave 3 + assistant-ui v0.14.5 conversion):
-//   1. apps/api/routes/turn.py emits an SSE `event: routing_decision` as the
-//      first yield (D-15 amendment). Payload is the STRUCTURED 5-key
-//      RoutingDecision record: {backend, model_or_agent, rationale,
-//      confidence, signals}.
-//   2. apps/web/lib/sse-translate.ts forwards this as an AI SDK v6 chunk
-//      `{type: "data-routing", data: <5-key>}`.
-//   3. @assistant-ui/react-ai-sdk's convertMessage maps any AI SDK part whose
-//      `type` starts with `data-` into an assistant-ui content entry of shape
-//      `{type: "data", name: "routing", data: <RoutingDecision>}`
-//      (see node_modules/@assistant-ui/react-ai-sdk/dist/ui/utils/convertMessage.js).
-//   4. This component finds that entry via `useMessage().content.find(...)`
-//      and renders the chip.
+// D-08: a manual-override turn (signals.override===true) renders a DISTINCT, neutral
+// (non-accent) pill reading "manual override". This pill reflects explicit user intent
+// and is NOT governed by L1 — it persists regardless of showBadge.
 //
-// IMPORTANT (Blocker 1 — Plan 05 revision iteration 1):
-// The local variable is `routing` (NOT `signals`) because the part's `data`
-// is the FULL RoutingDecision record. Reading `routing.backend`, `.model_or_agent`,
-// `.rationale`, `.confidence` directly is safe — Plan 02's Zod schema enforces
-// this shape at the wire boundary and the translator rejects malformed payloads.
+// showBadge gate: suppresses the AUTO optimized pill only. The manual-override pill
+// always renders (UI-SPEC §Copywriting "showBadge semantics").
+//
+// Data path (UNCHANGED from Phase 4/5 — byte-for-byte preserved):
+//   1. apps/api/routes/turn.py emits SSE `event: routing_decision`.
+//   2. apps/web/lib/sse-translate.ts forwards as AI SDK v6 `{type:"data-routing"}`.
+//   3. @assistant-ui/react-ai-sdk convertMessage maps to `{type:"data",name:"routing",data:<RoutingDecision>}`.
+//   4. This component finds that entry via `useMessage().content.find(isRoutingPart)`.
 //
 // Cross-refs:
 //   - apps/web/lib/types.ts (Backend + RoutingDecision)
 //   - apps/web/lib/chunk-schemas.ts (RoutingDecisionDataSchema)
-//   - config/model_mapping.json (display_name lookup — bundled, never fs.readFileSync)
-//   - 04-UI-SPEC.md §6 (visual contract + ARIA + animation)
-//   - 04-PATTERNS.md Pattern E (cn helper)
+//   - config/model_mapping.json / apps/web/lib/model-mapping.json (R4: keep this import)
+//   - 07-UI-SPEC.md §0.3, §Copywriting, §Color, §Typography
 "use client";
 
 import { useMessage } from "@assistant-ui/react";
 import { cn } from "@/lib/cn";
+import { useShowBadge } from "@/components/RoutingPrefsProvider";
 import type { Backend, RoutingDecision } from "@/lib/types";
 // Bundled JSON import (Pitfall 12 — never fs.readFileSync at request time).
 // The canonical source-of-truth is repo-root config/model_mapping.json;
@@ -43,32 +36,22 @@ import type { Backend, RoutingDecision } from "@/lib/types";
 // Keep the two files in sync — update both, or wire a pre-build copy step.
 import mapping from "@/lib/model-mapping.json";
 
-// Backend → chip color class (UI-SPEC §6.3). Unknown backends fall back to
-// the openrouter palette (graceful degradation, even though Plan 02's Zod
-// schema rejects unknown backends at the wire boundary).
-const chipClassByBackend: Record<Backend, string> = {
-  openrouter: "bg-slate-100 text-slate-900 border-slate-200",
-  claude_code: "bg-green-100 text-green-900 border-green-200",
-  computer_use: "bg-amber-100 text-amber-900 border-amber-200",
-};
-
 type ModelMappingEntry = { display_name?: string };
 const modelMapping = mapping as Record<string, ModelMappingEntry>;
 
+// Backend → human display name fallback (UI-SPEC §9b / §17). The auto-route
+// pill resolves the display name from config/model_mapping.json keyed by
+// `model_or_agent`. Agent backends emit model_or_agent: "claude-code" /
+// "computer-use" which have NO entry in model_mapping.json (only OpenRouter slugs).
+const displayNameByBackend: Record<Backend, string> = {
+  openrouter: "OpenRouter Auto Router",
+  claude_code: "Claude Code",
+  computer_use: "computer-use",
+};
+
 // Minimal structural shape of a data part. The chip reads from
 // `useMessage().content` — the raw ThreadMessage content array carried
-// through from the AI SDK runtime via assistant-ui's converter. The
-// AI-SDK v6 stream's `data-routing` chunks are converted by
-// @assistant-ui/react-ai-sdk's convertMessage.js into elements of shape
-// `{type: "data", name: "routing", data: <RoutingDecision>}` which land
-// directly on the message's `content` array.
-//
-// Note on naming: assistant-ui's runtime types refer to this as `parts`
-// in some surfaces (MessageState in store/scopes/message.d.ts adds a
-// `parts: PartState[]` derived from content), but the value exposed by
-// useMessage() in v0.14.5 is the raw ThreadMessage which only has
-// `content`. We read `content` directly so the chip works regardless of
-// whether the MessageClient wrapping is active.
+// through from the AI SDK runtime via assistant-ui's converter.
 type DataPart = { readonly type: "data"; readonly name: string; readonly data: unknown };
 type PartLike = { readonly type: string };
 type MessageStateWithContent = { readonly content: ReadonlyArray<PartLike> };
@@ -79,47 +62,102 @@ function isRoutingPart(
   return p.type === "data" && (p as { name?: string }).name === "routing";
 }
 
-export function RoutingChip(): React.JSX.Element | null {
+interface RoutingChipProps {
+  /** When false, the auto optimized pill is suppressed. The manual-override pill
+   * still renders regardless (D-08: reflects explicit user intent, not router
+   * rationale). Defaults to true if not provided. */
+  showBadge?: boolean;
+}
+
+export function RoutingChip({ showBadge: showBadgeProp }: RoutingChipProps): React.JSX.Element | null {
+  // showBadge resolution: an explicit prop wins (used by unit tests); otherwise
+  // fall back to the RoutingPrefs context, which defaults to true when no
+  // provider is mounted. Gates ONLY the auto optimized pill — the D-08
+  // manual-override pill below ignores showBadge (07-07 wiring).
+  const contextShowBadge = useShowBadge();
+  const showBadge = showBadgeProp ?? contextShowBadge;
   // useMessage is optional here so the chip doesn't crash if rendered outside
   // a MessagePrimitive context (e.g. in isolation during a Storybook story).
   const message = useMessage({ optional: true }) as
     | MessageStateWithContent
     | null;
   // Find the data-routing part on the message's content array.
+  // DATA PATH PRESERVED BYTE-FOR-BYTE from Phase 4/5 (isRoutingPart finds
+  // p.type==="data" && p.name==="routing").
   const routingPart = message?.content?.find(isRoutingPart);
 
   if (!routingPart) return null;
 
   const routing = routingPart.data;
   const mappingEntry = modelMapping[routing.model_or_agent];
+  // Auto-route display name: model_mapping.json keyed by `model_or_agent`,
+  // falling back to the raw slug (UI-04 contract — unmapped OpenRouter slugs
+  // render verbatim). UNCHANGED from Phase 4.
   const displayName = mappingEntry?.display_name ?? routing.model_or_agent;
-  const colorClass =
-    chipClassByBackend[routing.backend] ?? chipClassByBackend.openrouter;
 
-  // UI-SPEC §6.2 — rationale truncates at 80 chars with ellipsis. The full
-  // text lives in the title attribute so screen-reader users + hover users
-  // both see the un-truncated string.
-  const truncated =
-    routing.rationale.length > 80
-      ? routing.rationale.slice(0, 79) + "…"
-      : routing.rationale;
+  // D-08: manual-override branch (signals.override === true) — UNCHANGED data read.
+  // Re-skinned from the Hand-icon chip to the neutral Plasma pill.
+  const isOverride = routing.signals?.override === true;
+
+  if (isOverride) {
+    // Agent backends emit model_or_agent="claude-code" / "computer-use"
+    // which have NO model_mapping.json entry; the backend-keyed fallback
+    // resolves the §17 brand-cased name.
+    const overrideName =
+      mappingEntry?.display_name ??
+      displayNameByBackend[routing.backend] ??
+      routing.model_or_agent;
+
+    // D-08 neutral pill: non-accent, --surface-2/--ink/--line palette,
+    // reads "manual override". Persists regardless of showBadge.
+    return (
+      <span
+        role="status"
+        aria-live="polite"
+        aria-label={`Manual override: forced to ${overrideName}`}
+        title={`Manual override: forced to ${overrideName}`}
+        className={cn(
+          "inline-flex items-center gap-1 px-2 py-0.5 rounded-full border text-[11px] cursor-default select-none",
+          "bg-[var(--surface-2)] text-[var(--ink-2)] border-[var(--line)]",
+          "font-[var(--mono)]",
+          "motion-safe:animate-in motion-safe:fade-in-0 motion-safe:duration-150",
+        )}
+      >
+        manual override
+      </span>
+    );
+  }
+
+  // L1 AUTO pill: invisible-by-default, showBadge-gated.
+  // When showBadge is false, suppress the auto optimized pill entirely.
+  if (!showBadge) return null;
+
+  // Plasma "optimized" pill:
+  //   - Visible text: "optimized" (lowercase, JetBrains Mono 9.5px)
+  //   - Accent text + dot on var(--accent-soft) bg
+  //   - cursor: help (hover-to-reveal pattern)
+  //   - aria-label + title: full "Routed to {model} — {reason}" (em-dash U+2014,
+  //     FULL un-truncated rationale — UI-SPEC §0.3)
+  const ariaLabel = `Routed to ${displayName} — ${routing.rationale}`;
 
   return (
-    <div
+    <span
       role="status"
       aria-live="polite"
-      aria-label={`Routing decision: Routed to ${displayName}. ${routing.rationale}`}
-      title={routing.rationale}
+      aria-label={ariaLabel}
+      title={ariaLabel}
       className={cn(
-        "inline-flex items-center gap-2 px-2 py-1 rounded-md border text-[13px] motion-safe:animate-in motion-safe:fade-in-0 motion-safe:slide-in-from-top-1 motion-safe:duration-150",
-        colorClass,
+        "inline-flex items-center gap-1 px-2 py-0.5 rounded-full border border-[var(--accent-soft)] cursor-help select-none",
+        "bg-[var(--accent-soft)] text-[var(--accent)]",
+        "font-[var(--mono)] text-[9.5px]",
+        "motion-safe:animate-in motion-safe:fade-in-0 motion-safe:duration-150",
       )}
     >
-      <span className="font-semibold">Routed to {displayName}</span>
-      {" "}
-      <span className="opacity-70">{"·"}</span>
-      {" "}
-      <span>{truncated}</span>
-    </div>
+      <span
+        aria-hidden="true"
+        className="h-[5px] w-[5px] rounded-full shrink-0 bg-[var(--accent)]"
+      />
+      optimized
+    </span>
   );
 }

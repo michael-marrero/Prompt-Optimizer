@@ -13,9 +13,10 @@ Nine sub-tests covering the full blob storage surface
     test_large_screenshot_becomes_ref
                                        >=256KB Screenshot converts to
                                        image_ref shape: image_b64=None,
-                                       image_ref="<BLOBS_DIR>/<sha>.png";
-                                       file exists on disk with the
-                                       decoded bytes.
+                                       image_ref="<sha>.png" (bare content
+                                       KEY, BL-01 — not an absolute path);
+                                       file exists on disk under BLOBS_DIR
+                                       with the decoded bytes.
 
     test_identical_content_is_idempotent
                                        Calling twice with the same payload
@@ -208,8 +209,9 @@ def test_large_screenshot_becomes_ref(
     """A >=256KB Screenshot is rewritten to ``image_ref`` shape.
 
     300KB raw bytes -> sha256 hex -> ``<BLOBS_DIR>/<sha>.png`` on
-    disk; ``image_b64`` cleared; ``image_ref`` set to the absolute
-    target path.
+    disk; ``image_b64`` cleared; ``image_ref`` set to the bare content
+    KEY ``<sha>.png`` (BL-01 — NOT the absolute path; the serving
+    endpoint and React bubble both contract on the bare key/stem).
     """
 
     _reload_paths_and_blobs(monkeypatch, tmp_path)
@@ -226,10 +228,11 @@ def test_large_screenshot_becomes_ref(
     assert result.image_ref is not None, "image_ref must be set for >=256KB"
 
     sha = hashlib.sha256(raw).hexdigest()
-    expected = BLOBS_DIR / f"{sha}.png"
-    assert Path(result.image_ref) == expected, (
-        f"image_ref must be {expected}; got {result.image_ref}"
+    # BL-01: image_ref is the bare content key, not an absolute path.
+    assert result.image_ref == f"{sha}.png", (
+        f"image_ref must be the bare key {sha}.png; got {result.image_ref}"
     )
+    expected = BLOBS_DIR / f"{sha}.png"
     assert expected.exists(), f"blob file must exist at {expected}"
     assert expected.read_bytes() == raw, (
         "blob file contents must equal the decoded base64 bytes"
@@ -255,13 +258,15 @@ def test_identical_content_is_idempotent(
     _reload_paths_and_blobs(monkeypatch, tmp_path)
     from apps.api.backends.chunks import Screenshot
     from apps.api.blobs import _maybe_externalize_screenshot
+    from apps.api.paths import BLOBS_DIR
 
     raw = b"Z" * (300 * 1024)
     b64 = base64.b64encode(raw).decode("ascii")
     chunk = Screenshot(step=1, image_b64=b64)
 
     result1 = _maybe_externalize_screenshot(chunk)
-    target = Path(result1.image_ref)
+    # BL-01: image_ref is the bare content key — re-anchor to BLOBS_DIR.
+    target = BLOBS_DIR / result1.image_ref
     mtime_after_first = target.stat().st_mtime_ns
 
     # Second call must short-circuit (target already exists).
@@ -356,6 +361,7 @@ def test_jpeg_extension_honoured(
     _reload_paths_and_blobs(monkeypatch, tmp_path)
     from apps.api.backends.chunks import Screenshot
     from apps.api.blobs import _maybe_externalize_screenshot
+    from apps.api.paths import BLOBS_DIR
 
     raw = b"J" * (300 * 1024)
     b64 = base64.b64encode(raw).decode("ascii")
@@ -366,7 +372,8 @@ def test_jpeg_extension_honoured(
     assert result.image_ref.endswith(".jpeg"), (
         f"jpeg format must produce a .jpeg file extension; got {result.image_ref}"
     )
-    assert Path(result.image_ref).exists()
+    # BL-01: image_ref is the bare content key — re-anchor to BLOBS_DIR.
+    assert (BLOBS_DIR / result.image_ref).exists()
 
 
 # ---------------------------------------------------------------------
@@ -545,14 +552,19 @@ async def test_screenshot_chunk_externalized_in_stream(
                 "SSE wire image_ref must be set for >=256KB"
             )
 
-            # Blob file lives on disk under BLOBS_DIR.
-            ref_path = Path(sse_payload["image_ref"])
+            # BL-01: image_ref is the bare content key (`<sha>.<ext>`),
+            # NOT an absolute path. It must NOT contain a path separator.
+            image_ref = sse_payload["image_ref"]
+            assert "/" not in image_ref and "\\" not in image_ref, (
+                f"image_ref must be the bare content key, not a path; "
+                f"got {image_ref!r}"
+            )
+
+            # Blob file lives on disk under BLOBS_DIR (re-anchor the key).
+            ref_path = BLOBS_DIR / image_ref
             assert ref_path.exists(), f"blob file must exist at {ref_path}"
             assert ref_path.read_bytes() == raw, (
                 "blob file contents must equal the decoded base64 bytes"
-            )
-            assert str(ref_path).startswith(str(BLOBS_DIR)), (
-                f"blob path must be under BLOBS_DIR; got {ref_path}"
             )
 
             # DB assertion — the assistant message's content_blocks
@@ -575,7 +587,7 @@ async def test_screenshot_chunk_externalized_in_stream(
             assert screenshot_blocks[0].get("image_b64") is None, (
                 "DB content_blocks image_b64 must be None for >=256KB"
             )
-            assert screenshot_blocks[0].get("image_ref") == str(ref_path), (
+            assert screenshot_blocks[0].get("image_ref") == image_ref, (
                 f"DB content_blocks image_ref must match SSE ref; "
                 f"got {screenshot_blocks[0].get('image_ref')}"
             )

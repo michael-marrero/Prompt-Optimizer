@@ -70,6 +70,7 @@ Cross-refs:
 from __future__ import annotations
 
 import logging
+import os
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -152,8 +153,26 @@ async def lifespan(app: FastAPI):
     # turn in Wave 4. PATCH /settings (Wave 6) clears the registry;
     # the next turn rebuilds with fresh KeyStore values. Honour
     # test override (conftest ``app_factory`` may pre-set fakes).
+    #
+    # OSS-07 / D-06: ``PROMPT_OPTIMIZER_FAKE_ADAPTERS=1`` is the
+    # deterministic-E2E seam — it pre-wires the REAL OpenRouterAdapter
+    # to a canned fake client so the Playwright drift spec (Plan 06-03)
+    # exercises the full SSE wire + sse-translate.ts + AI-SDK runtime
+    # with no OpenRouter key or network. The flag is read ONLY here,
+    # nests INSIDE the ``_SENTINEL`` test-override gate (so the
+    # in-process conftest ``app_factory`` override still wins), and is
+    # deliberately NEVER added to ``.env.example`` — it is a CI/test-only
+    # flag, not a user-facing key.
     if getattr(app.state, "adapters", _SENTINEL) is _SENTINEL:
-        app.state.adapters = {}
+        if os.environ.get("PROMPT_OPTIMIZER_FAKE_ADAPTERS") == "1":
+            from apps.api.e2e_fakes import build_fake_openrouter_adapter
+
+            app.state.adapters = {"openrouter": build_fake_openrouter_adapter()}
+            logger.info(
+                "Lifespan: FAKE adapters wired (PROMPT_OPTIMIZER_FAKE_ADAPTERS=1)"
+            )
+        else:
+            app.state.adapters = {}
 
     # Step 7 — cache schema_version once at startup (Open Question 5).
     # Wave 2 ``/healthz`` reads from ``app.state.schema_version``

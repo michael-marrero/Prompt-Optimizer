@@ -1,8 +1,11 @@
-// D-18: this file must NEVER log the key. Every error path runs
-// `.replace(key, "***")` (Pattern G — Secret scrub) so the literal key
-// never appears in a thrown Error.message, response body, or response
-// header. The Playwright secure-key.spec.ts test (Plan 07) enforces
-// zero literal-key matches across Next stdout/stderr/responses.
+// D-18: this file must NEVER log the key. Every error path runs the
+// `scrubAll(text, key)` GLOBAL secret scrub (Pattern G — Secret scrub) so
+// the literal key never appears in a thrown Error.message, response body,
+// or response header. BL-02: the scrub MUST replace every occurrence — a
+// string-needle `String.replace` only removes the first, which leaks the
+// key when an upstream error echoes it more than once. The Playwright
+// secure-key.spec.ts test (Plan 07) enforces zero literal-key matches
+// across Next stdout/stderr/responses.
 //
 // Body translation: the browser POSTs the ergonomic
 // `{provider, key}` shape; this handler forwards as the FastAPI-native
@@ -29,6 +32,122 @@ export const runtime = "nodejs"; // Pitfall 1 — Node runtime only
 export const dynamic = "force-dynamic"; // status-changing endpoint; never cache
 
 const FASTAPI_URL = process.env.FASTAPI_URL ?? "http://localhost:8000";
+
+// BL-02: D-18 secret scrub. `String.prototype.replace(stringNeedle, …)`
+// replaces ONLY the first occurrence — an upstream error body that echoes
+// the key more than once (e.g. a Pydantic error repeating the input in both
+// `loc` context and `input`) would leak every occurrence after the first.
+// Replace ALL occurrences via a global regex built from the escaped key so
+// no literal-key substring survives the scrub (the secure-key.spec.ts
+// zero-literal-match guarantee).
+function scrubAll(haystack: string, secret: string): string {
+  if (secret.length === 0) return haystack;
+  const escaped = secret.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return haystack.replace(new RegExp(escaped, "g"), "***");
+}
+
+// GET /api/settings — settings-panel read (UI-12). Pure passthrough to
+// FastAPI `GET /api/v1/settings`, which returns the MASKED shape only
+// (keys never appear in plaintext — D-10/D-18). The masked body carries
+// `keys` (present/masked), `backends_enabled`, and `computer_use_opt_in`
+// so the panel can render every section from one round-trip. No
+// secret-scrub needed: the upstream never echoes a plaintext key here.
+//
+// Cross-refs:
+//   - 05-PATTERNS.md apps/web/app/api/settings/route.ts (EXTEND: GET + PATCH)
+//   - apps/api/routes/settings.py lines ~207-211 (masked GET shape)
+//   - 05-RESEARCH.md Security Domain (no Next-side key cache, Phase 4 D-18)
+export async function GET(_req: Request) {
+  let upstream: Response;
+  try {
+    upstream = await fetch(`${FASTAPI_URL}/api/v1/settings`);
+  } catch {
+    return Response.json(
+      { error: "API unavailable — is uvicorn running?" },
+      { status: 503 },
+    );
+  }
+
+  if (!upstream.ok) {
+    const text = await upstream.text().catch(() => "");
+    return new Response(text, {
+      status: upstream.status,
+      headers: { "Content-Type": "application/json" },
+    });
+  }
+
+  // Masked shape only — forward verbatim. The upstream NEVER returns a
+  // plaintext key (D-10), so no scrub is required on this path.
+  return Response.json(await upstream.json());
+}
+
+// PATCH /api/settings — backend toggles + computer-use opt-in (UI-12,
+// D-05/D-06). Forwards `{backends_enabled?, computer_use_opt_in?}` to
+// FastAPI `PATCH /api/v1/settings`. This toggle path carries NO key
+// material, so — unlike the POST key-submit path below — it needs no
+// secret scrub. We forward ONLY the two known toggle fields so a buggy
+// client cannot smuggle a `keys` block through the toggle UI; key writes
+// stay on the dedicated POST path with its scrub intact.
+export async function PATCH(req: Request) {
+  let body: {
+    backends_enabled?: unknown;
+    computer_use_opt_in?: unknown;
+    // Phase 7 (07-07) non-secret routing prefs.
+    priority?: unknown;
+    cost_aware_fallback?: unknown;
+    zero_data_retention?: unknown;
+  };
+  try {
+    body = await req.json();
+  } catch {
+    return Response.json({ error: "invalid JSON body" }, { status: 400 });
+  }
+
+  // Build a merge-patch carrying ONLY the present known non-secret fields so an
+  // omitted field is left untouched upstream (Pydantic exclude_unset) AND a
+  // buggy/hostile client cannot smuggle a `keys` block through the toggle UI —
+  // key writes stay on the dedicated POST path with its scrub intact (T-07-12).
+  const patch: {
+    backends_enabled?: unknown;
+    computer_use_opt_in?: unknown;
+    priority?: unknown;
+    cost_aware_fallback?: unknown;
+    zero_data_retention?: unknown;
+  } = {};
+  if ("backends_enabled" in body) patch.backends_enabled = body.backends_enabled;
+  if ("computer_use_opt_in" in body)
+    patch.computer_use_opt_in = body.computer_use_opt_in;
+  if ("priority" in body) patch.priority = body.priority;
+  if ("cost_aware_fallback" in body)
+    patch.cost_aware_fallback = body.cost_aware_fallback;
+  if ("zero_data_retention" in body)
+    patch.zero_data_retention = body.zero_data_retention;
+
+  let upstream: Response;
+  try {
+    upstream = await fetch(`${FASTAPI_URL}/api/v1/settings`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(patch),
+    });
+  } catch {
+    return Response.json(
+      { error: "API unavailable — is uvicorn running?" },
+      { status: 503 },
+    );
+  }
+
+  if (!upstream.ok) {
+    const text = await upstream.text().catch(() => "");
+    return new Response(text, {
+      status: upstream.status,
+      headers: { "Content-Type": "application/json" },
+    });
+  }
+
+  // Upstream returns the masked settings shape (same as GET) — verbatim.
+  return Response.json(await upstream.json());
+}
 
 export async function POST(req: Request) {
   // Parse body — guard against malformed JSON so a hostile/buggy client
@@ -76,11 +195,11 @@ export async function POST(req: Request) {
   } catch (err: unknown) {
     // Network error (ECONNREFUSED, DNS, timeout). The runtime's err
     // message MAY contain the serialized request body — scrub before
-    // returning. Using the canonical .replace(key, "***") form so the
-    // grep-based verifier finds the scrub call; the literal key cannot
+    // returning. BL-02: use the global scrubAll (every occurrence) so a
+    // key echoed more than once cannot leak; the literal key cannot
     // appear after this point.
     const rawMsg = String((err as { message?: string })?.message ?? err);
-    const errMsg = rawMsg.replace(key, "***");
+    const errMsg = scrubAll(rawMsg, key);
     return Response.json(
       { error: "Could not save key", detail: errMsg },
       { status: 503 },
@@ -99,7 +218,7 @@ export async function POST(req: Request) {
     } catch {
       // body unreadable — keep going with empty
     }
-    const scrubbed = text.replace(key, "***");
+    const scrubbed = scrubAll(text, key);
     return new Response(scrubbed, {
       status: upstream.status,
       headers: { "Content-Type": "application/json" },

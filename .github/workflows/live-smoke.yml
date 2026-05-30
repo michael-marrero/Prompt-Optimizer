@@ -40,3 +40,64 @@ jobs:
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
         run: |
           uv run pytest -m live apps/api/backends/openrouter -x --maxfail=1
+
+  # D-08 weekly live canary — one REAL-OpenRouter browser turn on top of the
+  # deterministic PR gate. The PR-gate drift step (web-test.yml) fakes the
+  # upstream; this job uses the REAL provider so it catches real-provider
+  # stream-shape surprises (e.g. OpenRouter changing its SSE shape) that a
+  # fake upstream cannot. Inherits the workflow_dispatch + weekly cron
+  # triggers above; same secret-gate so fork PRs no-op; continue-on-error so
+  # a provider hiccup never reds the repo.
+  live-drift-browser:
+    runs-on: ubuntu-latest
+    if: ${{ secrets.OPENROUTER_API_KEY != '' }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        # No `with: lfs: true` — the chat path loads only models/*.joblib
+        # (regular git objects); the LFS-tracked CSVs are training-only (D-03).
+
+      - uses: pnpm/action-setup@v3
+        with:
+          version: 9
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "pnpm"
+          cache-dependency-path: apps/web/pnpm-lock.yaml
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          enable-cache: true
+
+      - name: Install Python 3.11
+        run: uv python install 3.11
+
+      - name: Sync Python dependencies (locked)
+        run: uv sync --locked
+
+      - name: Install JS dependencies
+        run: pnpm --dir apps/web install
+
+      - name: Install Playwright Chromium
+        run: pnpm --dir apps/web exec playwright install --with-deps chromium
+
+      # The real brain triggers an on-demand NLTK punkt_tab download on the
+      # first decide() call — prefetch it before booting uvicorn (ci.yml:48-50).
+      - name: Pre-fetch NLTK data (real-uvicorn drift job needs it)
+        run: |
+          uv run python -c "import nltk; nltk.download('punkt_tab', quiet=True); nltk.download('punkt', quiet=True)"
+
+      # Boots the REAL uvicorn apps.api.main:app + next dev with the REAL
+      # OPENROUTER_API_KEY (NOT PROMPT_OPTIMIZER_FAKE_ADAPTERS — the whole
+      # point of the canary is exercising the real provider). PROMPT_OPTIMIZER_HOME
+      # is a throwaway runner-temp dir so the uvicorn-written chat.db / feedback
+      # log don't collide. continue-on-error so a provider hiccup never reds the repo.
+      - name: Live browser turn (real OpenRouter — D-08)
+        continue-on-error: true
+        env:
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          PROMPT_OPTIMIZER_HOME: ${{ runner.temp }}/po-live-drift-home
+        run: pnpm --dir apps/web exec playwright test --config=playwright/playwright.config.ts playwright/drift.spec.ts

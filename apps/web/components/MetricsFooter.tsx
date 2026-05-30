@@ -75,7 +75,7 @@ export function MetricsFooter(): React.JSX.Element {
     return (
       <div
         aria-label="Streaming response in progress"
-        className="text-xs font-mono text-slate-500 mt-2 flex items-center gap-1"
+        className="text-xs font-mono text-[var(--ink-3)] mt-2 flex items-center gap-1"
       >
         <span>streaming</span>
         <span aria-hidden="true" className="animate-pulse">
@@ -93,7 +93,7 @@ export function MetricsFooter(): React.JSX.Element {
 
   return (
     <div
-      className="text-xs font-mono text-slate-500 mt-2"
+      className="text-xs font-mono text-[var(--ink-3)] mt-2"
       aria-label={`Turn cost ${cost}, latency ${latency}, ${m.tokens_in ?? 0} tokens in, ${m.tokens_out ?? 0} tokens out`}
     >
       {cost} · {latency} · {tokensIn}↑/{tokensOut}↓

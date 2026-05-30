@@ -83,10 +83,10 @@ export function FirstRunModal({ open }: FirstRunModalProps): React.JSX.Element |
             ARIA requirements are still satisfied because Radix's auto-wiring
             produces the same semantic outcome.
           */}
-          <DialogTitle className="text-lg font-semibold text-slate-900">
+          <DialogTitle className="text-lg font-semibold text-[var(--ink)]">
             Connect OpenRouter to get started
           </DialogTitle>
-          <DialogDescription className="text-sm text-slate-700 leading-relaxed mt-2">
+          <DialogDescription className="text-sm text-[var(--ink-2)] leading-relaxed mt-2">
             Prompt-Optimizer routes your prompts to the best model. OpenRouter is the gateway to most chat models — start by pasting your key.
           </DialogDescription>
         </DialogHeader>
@@ -95,13 +95,13 @@ export function FirstRunModal({ open }: FirstRunModalProps): React.JSX.Element |
           <KeyForm mode="blocking" />
         </div>
 
-        <p className="text-xs text-slate-500 mt-4">
+        <p className="text-xs text-[var(--ink-3)] mt-4">
           Don&apos;t have a key? Get one at{" "}
           <a
             href="https://openrouter.ai/keys"
             target="_blank"
             rel="noopener noreferrer"
-            className="underline underline-offset-2 hover:text-slate-700"
+            className="underline underline-offset-2 hover:text-[var(--ink-2)]"
           >
             openrouter.ai/keys ↗
           </a>

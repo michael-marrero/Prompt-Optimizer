@@ -46,7 +46,11 @@ export async function POST(req: Request) {
   // resolved `threadId` so this handler does not need to call
   // getOrCreateDefaultThread itself (UI-17 — browser owns the cache).
   // ----------------------------------------------------------------
-  let body: { messages?: unknown; threadId?: unknown };
+  let body: {
+    messages?: unknown;
+    threadId?: unknown;
+    override_backend?: unknown;
+  };
   try {
     body = await req.json();
   } catch {
@@ -98,10 +102,33 @@ export async function POST(req: Request) {
       typeof (p as { text: unknown }).text === "string",
   );
   const content = (lastUserMessage as { content?: unknown })?.content;
+  // WR-07: prefer the text part only when it is a NON-EMPTY string. A
+  // `??` chain short-circuits on `""` (not null/undefined), so an empty
+  // text part would suppress a non-empty `content` fallback; and the
+  // trailing `?? ""` was dead because the middle operand is always a
+  // string. Use an explicit non-empty check instead.
   const userText: string =
-    textPart?.text ??
-    (typeof content === "string" ? content : "") ??
-    "";
+    typeof textPart?.text === "string" && textPart.text.length > 0
+      ? textPart.text
+      : typeof content === "string"
+        ? content
+        : "";
+
+  // ----------------------------------------------------------------
+  // D-01/D-02 per-turn override (UI-05). The client's
+  // `prepareSendMessagesRequest` injects `override_backend` into the
+  // body for an overridden send (a closed value ∈ {openrouter,
+  // claude_code, computer_use}); auto turns OMIT it. Forward it to the
+  // FastAPI turn body ONLY when present — when absent, FastAPI runs the
+  // normal routing brain (and the 05-01 allowlist filter). Forwarding a
+  // null/empty value would defeat the allowlist filter, so we include the
+  // field only for a non-empty string.
+  // ----------------------------------------------------------------
+  const rawOverride = body.override_backend;
+  const overrideBackend =
+    typeof rawOverride === "string" && rawOverride.length > 0
+      ? rawOverride
+      : undefined;
 
   // ----------------------------------------------------------------
   // D-09: forward AbortController chain via `signal: req.signal`. When
@@ -118,7 +145,10 @@ export async function POST(req: Request) {
       {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message: userText }),
+        body: JSON.stringify({
+          message: userText,
+          ...(overrideBackend ? { override_backend: overrideBackend } : {}),
+        }),
         signal: req.signal,
       },
     );

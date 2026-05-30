@@ -1,19 +1,183 @@
-/* Tailwind v4 CSS-first config — UI-SPEC §1, CONTEXT D-03/D-04 (light mode only).
- * The shadcn nova preset already wrote its own @theme tokens elsewhere; this
- * file is the entry point Next bundles. NO prefers-color-scheme branch: Phase 4
- * is light-mode-only and dark mode is deferred to Phase 6+ (CONTEXT D-04). */
+/* Plasma design-token layer — Phase 7 (chat-ui-redesign-plasma), Plan 07-02.
+ *
+ * Tailwind v4 CSS-first config (no tailwind.config.*). The `@import "tailwindcss"`
+ * stays on line 1 — it is the entry point Next bundles and the shadcn radix-nova
+ * primitives in components/ui/ continue to read their own @theme tokens downstream.
+ *
+ * This file replaces the Phase-4 slate/Geist @theme-inline layer with the Plasma
+ * CSS-variable system: the default (Plasma) :root token set + four DORMANT
+ * alternate-theme class blocks (citrus / tide / bauhaus / carbon), transcribed
+ * VERBATIM from design_handoff_prompt_optimizer/source/styles.css (UI-SPEC §Color /
+ * §Spacing / §Typography / §Alternate Themes — LOCKED, "do not round"). next-themes
+ * drives the theme class on <html>; default is Plasma so the alternates ship
+ * dormant (D-07).
+ *
+ * D-06/O-6: a DEDICATED --danger token (literal red #e5484a) lives alongside the
+ * brand magenta --warn (#ff3d8b) — destructive UI must NOT reuse --warn.
+ *
+ * Per 07-PATTERNS.md (token-layer-swap caveat): only token VALUES + the body
+ * baseline are transcribed here. The prototype's semantic selectors (the send
+ * button, toggle knob pseudo-element, new-chat button, …) are NOT copied — the
+ * Carbon per-element overrides (send-arrow ink, toggle knob, etc.) are re-expressed
+ * on the rebuilt components' own class names in their owning Wave 2/3 plans. */
 @import "tailwindcss";
 
-@theme inline {
-  --color-background: #ffffff;
-  --color-foreground: #0f172a; /* slate-900 — UI-SPEC §4.1 text-default */
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+/* ─── Theme defaults (Plasma — warm paper, electric violet) ─── */
+:root {
+  --bg: #f8f6f1;
+  --bg-gradient: none;
+  --surface: #ffffff;
+  --surface-2: #efece4;
+  --line: #e6e1d4;
+  --line-strong: #c8c2b1;
+  --ink: #14121f;
+  --ink-2: #3f3c4f;
+  --ink-3: #6c697b;
+  --ink-4: #98959f;
+  --accent: #6d4aff;
+  --accent-hover: #5933ee;
+  --accent-soft: rgba(109, 74, 255, 0.10);
+  --accent-ink: #ffffff;
+  --accent-2: #ff3d8b;
+  --accent-3: #00e8c0;
+  --good: #00b884;
+  --warn: #ff3d8b;
+  /* D-06/O-6 — dedicated destructive red; NOT --warn (#ff3d8b magenta). */
+  --danger: #e5484a;
+  --shadow-sm: 0 1px 1px rgba(20, 18, 31, 0.04), 0 0 0 1px rgba(20, 18, 31, 0.05);
+  --shadow-md: 0 2px 6px rgba(20, 18, 31, 0.06), 0 0 0 1px rgba(20, 18, 31, 0.06);
+  --shadow-lg: 0 16px 48px -10px rgba(20, 18, 31, 0.18), 0 0 0 1px rgba(20, 18, 31, 0.06);
+  --shadow-focus: 0 0 0 4px var(--accent-soft);
+  --radius: 9px;
+  --radius-sm: 6px;
+  --radius-lg: 14px;
+  /* Font stacks — the next/font/google vars from layout.tsx fall back to the
+   * LOCKED family stacks (UI-SPEC §Typography). */
+  --display: var(--font-display), 'Instrument Sans', 'Inter Tight', ui-sans-serif, system-ui, sans-serif;
+  --mono: var(--font-mono-plasma), 'JetBrains Mono', ui-monospace, monospace;
 }
 
+/* Body baseline — token-driven background/ink + the LOCKED Plasma type baseline
+ * (UI-SPEC §Typography). Replaces the Phase-4 slate/white body so Carbon dark and
+ * the other alternate themes are not fought by a hard-coded white background. */
 body {
-  background: var(--color-background);
-  color: var(--color-foreground);
-  font-family: var(--font-sans), ui-sans-serif, system-ui, -apple-system,
-    "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  font-family: var(--font-body), 'Inter Tight', ui-sans-serif, system-ui, -apple-system, sans-serif;
+  font-size: 14px;
+  line-height: 1.5;
+  letter-spacing: -0.005em;
+  color: var(--ink);
+  background: var(--bg);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+/* ────────────────────────────────────────────────────────────
+   THEMES (dormant — next-themes sets .theme-* on <html>; D-07)
+   Transcribed VERBATIM from source/styles.css:753-845.
+   ──────────────────────────────────────────────────────────── */
+
+/* Theme: Citrus — warm bone, terracotta + lemon */
+.theme-citrus {
+  --bg: #f3ecdc;
+  --surface: #fbf6e9;
+  --surface-2: #ebe2c8;
+  --line: #ddd2b3;
+  --line-strong: #b8ac8a;
+  --ink: #1f1c10;
+  --ink-2: #4a4530;
+  --ink-3: #6e6648;
+  --ink-4: #9a9170;
+  --accent: #d95226;
+  --accent-hover: #b8421a;
+  --accent-soft: rgba(217, 82, 38, 0.13);
+  --accent-2: #ddc31a;
+  --accent-3: #d95226;
+  --warn: #d95226;
+}
+
+/* Theme: Tide — pale mint, deep teal, coral surprise */
+.theme-tide {
+  --bg: #ecf6f4;
+  --surface: #ffffff;
+  --surface-2: #ddeceb;
+  --line: #c9dedb;
+  --line-strong: #92b3ae;
+  --ink: #062528;
+  --ink-2: #2f4a4d;
+  --ink-3: #5a7274;
+  --ink-4: #8aa0a2;
+  --accent: #ff6b54;
+  --accent-hover: #e85842;
+  --accent-soft: rgba(255, 107, 84, 0.12);
+  --accent-2: #2dc4b6;
+  --accent-3: #ffb648;
+}
+
+/* Theme: Bauhaus — ivory, navy, primary red + mustard + cobalt.
+ * Overrides the radii token set (sharper corners). */
+.theme-bauhaus {
+  --bg: #f3ecdf;
+  --surface: #fbf6ea;
+  --surface-2: #e9dfc7;
+  --line: #d6c8a8;
+  --line-strong: #a89a78;
+  --ink: #0e1b3d;
+  --ink-2: #36436a;
+  --ink-3: #5e6a8a;
+  --ink-4: #8a93ad;
+  --accent: #e63946;
+  --accent-hover: #c41f2c;
+  --accent-soft: rgba(230, 57, 70, 0.12);
+  --accent-2: #f4b942;
+  --accent-3: #2563eb;
+  --radius: 6px;
+  --radius-sm: 4px;
+  --radius-lg: 10px;
+}
+
+/* Theme: Carbon — dark, lavender violet + cyan + warm pink.
+ * Overrides all three shadow tokens + adds --bg-gradient (dark elevation).
+ * Per-element ink overrides (send-arrow → #0b0d14, toggle knob → #f0eee8,
+ * new-chat glow, etc.) from source/styles.css:834-845 are re-expressed on the
+ * rebuilt components' class names in the Wave 2/3 plans that own those surfaces —
+ * the prototype semantic selectors are intentionally NOT copied here. */
+.theme-carbon {
+  --bg: #0b0d14;
+  --bg-gradient:
+    radial-gradient(60% 50% at 12% 8%, rgba(167, 139, 250, 0.18) 0%, transparent 55%),
+    radial-gradient(50% 40% at 90% 12%, rgba(255, 125, 167, 0.10) 0%, transparent 60%),
+    radial-gradient(60% 50% at 78% 96%, rgba(93, 211, 255, 0.10) 0%, transparent 55%);
+  --surface: #14171f;
+  --surface-2: #1c2030;
+  --line: rgba(255, 255, 255, 0.08);
+  --line-strong: rgba(255, 255, 255, 0.18);
+  --ink: #f0eee8;
+  --ink-2: #c2bfb6;
+  --ink-3: #8c8a83;
+  --ink-4: #5d5c57;
+  --accent: #a78bfa;
+  --accent-hover: #b9a3fc;
+  --accent-soft: rgba(167, 139, 250, 0.18);
+  --accent-2: #5dd3ff;
+  --accent-3: #ff7da7;
+  --shadow-sm: 0 1px 1px rgba(0,0,0,0.3), 0 0 0 1px rgba(255,255,255,0.05);
+  --shadow-md: 0 4px 12px rgba(0,0,0,0.35), 0 0 0 1px rgba(255,255,255,0.07);
+  --shadow-lg: 0 20px 60px -10px rgba(0,0,0,0.5), 0 0 0 1px rgba(255,255,255,0.07);
+}
+/* Carbon paints its --bg-gradient on the body so the dark elevation shows even
+ * before the Wave 2/3 .app shell mounts. */
+.theme-carbon body {
+  background-image: var(--bg-gradient);
+  background-attachment: fixed;
+}
+
+/* Scrollbars — transcribed from source/styles.css:854-863. Bound to the rebuilt
+ * scroll containers' class names in their owning plans; the generic thumb styling
+ * applies to the document scrollbar today. */
+::-webkit-scrollbar { width: 8px; }
+::-webkit-scrollbar-thumb {
+  background: var(--line-strong);
+  border-radius: 4px;
+  border: 2px solid transparent;
+  background-clip: content-box;
 }

@@ -43,15 +43,15 @@ beforeEach(() => {
 });
 
 describe("UI-08 unit — ChatBubble (assistant)", () => {
-  it("UI-08: assistant bubble has bg-slate-50 border rounded-lg p-4 max-w-prose group relative", () => {
+  it("UI-08: assistant bubble has the Plasma surface/line tokens + rounded-lg p-4 max-w-prose group relative", () => {
     const { container } = render(
       <ChatBubble role="assistant" rawMarkdown="# hello">
         <p>body</p>
       </ChatBubble>,
     );
     const bubble = container.firstChild as HTMLElement;
-    expect(bubble.className).toMatch(/bg-slate-50/);
-    expect(bubble.className).toMatch(/border-slate-200/);
+    expect(bubble.className).toMatch(/var\(--surface-2\)/);
+    expect(bubble.className).toMatch(/var\(--line\)/);
     expect(bubble.className).toMatch(/rounded-lg/);
     expect(bubble.className).toMatch(/p-4/);
     expect(bubble.className).toMatch(/max-w-prose/);

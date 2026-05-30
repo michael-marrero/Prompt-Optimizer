@@ -51,7 +51,35 @@ jobs:
       - name: Vitest (unit + component)
         run: pnpm --dir apps/web test
 
-      - name: Playwright E2E (mock FastAPI — no OpenRouter key needed)
+      # Mock-only specs (no-flicker / first-run / secure-key / routing-chip)
+      # run against mock-fastapi.py and must NEVER boot the real backend, so
+      # the drift spec is grep-inverted out of this step (the drift spec runs
+      # in its own real-uvicorn step below). D-07 dual-mode split.
+      - name: Playwright E2E (mock FastAPI — no OpenRouter key needed, excludes drift)
         env:
           USE_MOCK_FASTAPI: "1"
-        run: pnpm --dir apps/web test:e2e
+        run: pnpm --dir apps/web test:e2e --grep-invert drift
+
+      # The real-uvicorn drift job boots the real brain, which triggers an
+      # on-demand NLTK punkt_tab download on the first decide() call. The
+      # mock path never boots the real brain, so web-test.yml had no NLTK
+      # prefetch until now (RESEARCH Pitfall 2). Lifted verbatim from
+      # ci.yml:48-50.
+      - name: Pre-fetch NLTK data (real-uvicorn drift job needs it)
+        run: |
+          uv run python -c "import nltk; nltk.download('punkt_tab', quiet=True); nltk.download('punkt', quiet=True)"
+
+      # OSS-07 PR gate: boot the REAL uvicorn apps.api.main:app + next dev
+      # (default playwright.config.ts branch — no USE_MOCK_FASTAPI) and run
+      # ONLY the drift spec. PROMPT_OPTIMIZER_FAKE_ADAPTERS=1 is set at the
+      # step env level so Playwright's spawned `python -m uvicorn` child
+      # inherits it (RESEARCH Pitfall 1) and lifespan.py wires Plan 06-01's
+      # fake OpenRouter adapter — deterministic, keyless, zero-cost,
+      # fork-PR-safe (D-06). PROMPT_OPTIMIZER_HOME is a throwaway runner-temp
+      # dir so the uvicorn-written chat.db / feedback log don't collide
+      # (RESEARCH Runtime State Inventory).
+      - name: Playwright drift E2E (real uvicorn + fake upstream — OSS-07)
+        env:
+          PROMPT_OPTIMIZER_FAKE_ADAPTERS: "1"
+          PROMPT_OPTIMIZER_HOME: ${{ runner.temp }}/po-drift-home
+        run: pnpm --dir apps/web exec playwright test --config=playwright/playwright.config.ts playwright/drift.spec.ts

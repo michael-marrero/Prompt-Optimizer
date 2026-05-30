@@ -1,0 +1,2 @@
+# Placeholder so docs/img/ exists before the Plan 06-04 capture step writes the real PNGs.
+# capture-screenshots.capture.ts writes hero.png + chip-{openrouter,claude-code,computer-use}.png here.

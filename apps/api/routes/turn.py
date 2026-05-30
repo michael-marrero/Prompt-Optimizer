@@ -157,6 +157,7 @@ from apps.api.db.queries import (
     persist_turn,
 )
 from apps.api.jsonl_log import append_routing_decisions_jsonl
+from apps.api.paths import PROJECT_ROOT
 from apps.api.settings import computer_use_enabled
 from src.routing.decide import decide
 from src.routing.schema import RoutingDecision
@@ -215,7 +216,9 @@ _OVERRIDE_DEFAULTS: dict[str, str] = {
 }
 
 
-def _synthesize_override_decision(backend: str) -> RoutingDecision:
+def _synthesize_override_decision(
+    backend: str, model_or_agent: str | None = None
+) -> RoutingDecision:
     """Return a ``RoutingDecision`` for the caller-supplied backend.
 
     Pattern 11: skips the ``decide()`` brain entirely and emits a
@@ -227,16 +230,192 @@ def _synthesize_override_decision(backend: str) -> RoutingDecision:
     uncertainty); ``signals={"override": True}`` marks the row in
     the routing_decisions table so offline analysis can filter
     override rows out cleanly.
+
+    ``model_or_agent`` (Phase 7 Plan 07-08 — Compare lanes): when
+    provided, FORCE this exact provider-ready identifier instead of the
+    per-backend default. The Compare path forces a specific OpenRouter
+    slug per lane (e.g. ``"openai/gpt-5"``) so each column's
+    ``routing_decision`` echoes the model the lane streamed from. The
+    caller MUST have validated the slug against the allowlist first
+    (``_compare_model_allowlist`` — T-07-16 SSRF/over-fetch guard);
+    this function does NOT re-validate. When ``None`` (the Phase 5
+    UI-05 override path), fall back to the per-backend default.
     """
 
-    model_or_agent = _OVERRIDE_DEFAULTS[backend]
+    # IN-03: ``.get`` with a safe fallback rather than a bare subscript.
+    # Callers constrain ``backend`` to the three known values today, so
+    # this is unreachable now — but a future caller passing an out-of-set
+    # backend gets a valid model identifier instead of an unhandled
+    # KeyError mid-stream.
+    resolved_model = model_or_agent or _OVERRIDE_DEFAULTS.get(
+        backend, "openrouter/auto"
+    )
     return RoutingDecision(
         backend=backend,  # type: ignore[arg-type] — Literal check at body
-        model_or_agent=model_or_agent,
+        model_or_agent=resolved_model,
         rationale="user override",
         confidence=1.0,
         signals={"override": True},
     )
+
+
+# --------------------------------------------------------------------
+# Compare forced-model allowlist — Phase 7 Plan 07-08 (Seam A, T-07-16)
+# --------------------------------------------------------------------
+
+
+# The two models that DEFAULT the Compare lanes (RESEARCH Open Question 1).
+# Choice: two strong OpenRouter chat models — GPT-5 (lane 0) + Claude
+# Sonnet 4.5 (lane 1). GPT-5 is the auto-router's frequent strong-tier
+# pick (it is a verified ``api_model`` in config/model_mapping.json);
+# Claude Sonnet 4.5 is the strong alternate the UI-SPEC §Copywriting
+# Compare-card example names ("Claude Sonnet 4.5 · 1.84s · $0.0042").
+# Both are on the OpenRouter aggregator, so each lane dispatches through
+# the single ``openrouter`` adapter with the slug forced per lane.
+_COMPARE_DEFAULT_MODELS: tuple[str, str] = (
+    "openai/gpt-5",
+    "anthropic/claude-sonnet-4.5",
+)
+
+
+def _compare_model_allowlist() -> frozenset[str]:
+    """Return the set of model IDs a Compare lane may force (SSRF guard).
+
+    T-07-16: a Compare request supplies two model IDs that select which
+    upstream model each lane calls — a forced-model / over-fetch surface.
+    The client must NOT be able to name an arbitrary upstream model, so
+    this allowlist gates every requested slug BEFORE dispatch; anything
+    off-list is rejected (422) by ``post_compare``.
+
+    The allowlist is the UNION of:
+
+      - Every verified OpenRouter ``api_model`` slug in
+        ``config/model_mapping.json`` (provider == "openrouter" with a
+        non-null ``api_model``). These are the slugs the routing brain
+        itself resolves to, so the Compare path can force any of them.
+      - The two ``_COMPARE_DEFAULT_MODELS`` lane defaults. Claude Sonnet
+        4.5 is the locked default alternate (UI-SPEC) but is not a
+        benchmark-dataset slug in model_mapping.json, so it is added
+        explicitly here rather than silently widening the mapping.
+
+    Read from disk on each call (cheap — a single small JSON file) so a
+    user editing ``config/model_mapping.json`` to add an OpenRouter model
+    sees it in Compare without a server restart. Mirrors how
+    ``decide()`` reloads the mapping via its artifacts dict.
+    """
+
+    allow: set[str] = set(_COMPARE_DEFAULT_MODELS)
+    mapping_path = PROJECT_ROOT / "config" / "model_mapping.json"
+    try:
+        with open(mapping_path, "r", encoding="utf-8") as fh:
+            mapping = json.load(fh)
+    except (OSError, ValueError):
+        # Missing / malformed mapping → fall back to the locked defaults
+        # only. The guard stays CLOSED (never opens to arbitrary slugs)
+        # so a damaged config can never turn into an SSRF hole.
+        return frozenset(allow)
+
+    for entry in mapping.values():
+        if not isinstance(entry, dict):
+            continue
+        if entry.get("provider") != "openrouter":
+            continue
+        api_model = entry.get("api_model")
+        if isinstance(api_model, str) and api_model:
+            allow.add(api_model)
+    return frozenset(allow)
+
+
+# --------------------------------------------------------------------
+# D-05 allowlist reroute synthesis (Phase 5 — NOT the override synth)
+# --------------------------------------------------------------------
+
+
+# Neutral auto-route rationale for a silent reroute (D-07). This reads
+# like a normal route to the fallback backend — it deliberately carries
+# NO "X disabled" / "rerouted" visible-noise text (D-07 rejects that)
+# so the UI's RoutingChip renders the plain "Routed to …" chip, not the
+# OverrideChip and not a noisy reroute banner.
+_REROUTE_RATIONALE: str = "routed to the best available backend"
+
+
+def _synthesize_reroute_decision(
+    backend: str, original: RoutingDecision
+) -> RoutingDecision:
+    """Return a silent auto-route ``RoutingDecision`` for the fallback ``backend``.
+
+    Distinct from ``_synthesize_override_decision``: that synth marks the
+    row as a user override (``rationale="user override"``,
+    ``signals={"override": True}``) which is WRONG for a D-05/D-07 silent
+    reroute. This synth produces a neutral auto-route-style decision:
+
+      - ``rationale`` is the neutral ``_REROUTE_RATIONALE`` — no
+        "disabled" / "rerouted" noise (D-07).
+      - ``signals.override`` is ABSENT (so RoutingChip renders the normal
+        "Routed to …" chip, not the OverrideChip). The original decision's
+        telemetry signals are preserved for offline analysis and a
+        ``rerouted_from`` breadcrumb is added so the offline dataset can
+        still reconstruct what the brain originally picked.
+      - ``confidence`` carries the original decision's confidence forward
+        (the reroute does not invent a new uncertainty estimate; the
+        top-class confidence the brain reported still describes how sure
+        the brain was about the prompt's intent).
+
+    The ``model_or_agent`` for the fallback backend reuses the same
+    per-backend default ``decide()``/the override path would emit (the
+    ``_OVERRIDE_DEFAULTS`` table — ``openrouter`` → ``openrouter/auto``)
+    so the rerouted turn dispatches with a valid model identifier.
+    """
+
+    # IN-03: guarded lookup — see ``_synthesize_override_decision``.
+    model_or_agent = _OVERRIDE_DEFAULTS.get(backend, "openrouter/auto")
+
+    # Preserve the original telemetry signals (never key material — Phase
+    # 1 composes signals from stage telemetry only) and add a breadcrumb.
+    # ``override`` is intentionally NOT set so the chip stays neutral.
+    signals = dict(getattr(original, "signals", None) or {})
+    signals.pop("override", None)
+    signals["rerouted_from"] = original.backend
+
+    return RoutingDecision(
+        backend=backend,  # type: ignore[arg-type] — Backend literal
+        model_or_agent=model_or_agent,
+        rationale=_REROUTE_RATIONALE,
+        confidence=original.confidence,
+        signals=signals,
+    )
+
+
+def _enabled_backends(settings: dict) -> list[str]:
+    """Compute the ordered set of dispatch-eligible backends (D-05/D-06).
+
+    - Reads ``settings["backends_enabled"]`` (shape:
+      ``{"openrouter": True, "claude_code": True, "computer_use": False}``).
+    - Removes ``computer_use`` unless the D-06 STRICT-AND gate passes
+      (``computer_use_enabled(settings)`` — env flag AND in-app toggle).
+    - Floors the result at ``["openrouter"]`` so an all-disabled settings
+      blob never produces an empty allowlist dead-end.
+
+    Order is preserved with ``openrouter`` first when enabled so the
+    reroute target selection is deterministic.
+    """
+
+    backends_enabled = settings.get("backends_enabled") or {}
+    enabled: list[str] = []
+    for backend in ("openrouter", "claude_code", "computer_use"):
+        if not backends_enabled.get(backend):
+            continue
+        if backend == "computer_use" and not computer_use_enabled(settings):
+            # D-06 STRICT-AND: the toggle alone is not enough; the env
+            # flag must also be set. computer_use stays unreachable on
+            # auto turns unless BOTH gates are on.
+            continue
+        enabled.append(backend)
+
+    # Floor — openrouter is always reachable so a turn never dead-ends.
+    if not enabled:
+        enabled = ["openrouter"]
+    return enabled
 
 
 # --------------------------------------------------------------------
@@ -411,6 +590,33 @@ async def post_turn(
             app.state.settings,
         )
 
+        # ------------------------------------------------------------
+        # D-05 allowlist post-filter (RESEARCH Option B — post-filter,
+        # smallest blast radius; src/routing/decide.py untouched).
+        # ------------------------------------------------------------
+        #
+        # GATED on the override path being absent: this branch only runs
+        # for AUTO turns. Explicit ``override_backend`` turns are handled
+        # in the ``if`` branch above and are NEVER rerouted (Pitfall 7 —
+        # the user's manual pick wins even when that backend is disabled;
+        # the existing computer-use 400 guard already validates override
+        # turns).
+        #
+        # If the brain's pick is not in the enabled set, silently re-map
+        # to the best enabled backend (prefer openrouter, else the first
+        # enabled) with a NEUTRAL auto-route rationale (D-07) — never the
+        # override synth.
+        enabled = _enabled_backends(app.state.settings)
+        if decision.backend not in enabled:
+            fallback = "openrouter" if "openrouter" in enabled else enabled[0]
+            logger.info(
+                "allowlist_reroute from=%s to=%s turn_id=%s",
+                decision.backend,
+                fallback,
+                turn_id,
+            )
+            decision = _synthesize_reroute_decision(fallback, decision)
+
     # D-19 INFO log #2 — routing_decision. The rationale is bounded
     # by the Phase 1 fallback suffix locked string + the per-stage
     # signal strings (task_type / agentic_intent / rule_fired); it
@@ -447,11 +653,18 @@ async def post_turn(
 
     # Per-turn cost cap precedence: request body > settings >
     # DEFAULT_PER_TURN_COST_USD (50¢).
-    max_cost_usd = (
-        body.max_cost_usd
-        or app.state.settings.get("default_max_cost_usd")
-        or DEFAULT_PER_TURN_COST_USD
-    )
+    # CR-02: distinguish "absent" (None) from an explicit zero. A caller
+    # setting `max_cost_usd: 0.0` (a hard "spend nothing" cap) must NOT
+    # collapse to the default via a falsy `or` — that silently ignores a
+    # legitimate budget, the opposite of the user's intent. Same hazard
+    # for `default_max_cost_usd: 0` in settings.
+    default_cap = app.state.settings.get("default_max_cost_usd")
+    if body.max_cost_usd is not None:
+        max_cost_usd = body.max_cost_usd
+    elif default_cap is not None:
+        max_cost_usd = default_cap
+    else:
+        max_cost_usd = DEFAULT_PER_TURN_COST_USD
 
     options = AdapterOptions(
         model=decision.model_or_agent,
@@ -631,3 +844,321 @@ async def post_turn(
     # to <1s so the heartbeat fires within the test budget without
     # the test sleeping 15s in CI.
     return EventSourceResponse(event_stream(), ping=15)
+
+
+# --------------------------------------------------------------------
+# Compare (Seam A) — POST /api/v1/threads/{thread_id}/compare
+# --------------------------------------------------------------------
+#
+# Phase 7 Plan 07-08 (L5 + ROADMAP parallel-completions note). One prompt
+# rendered side-by-side across two candidate models: the endpoint forces
+# each lane's model through the SAME ``_synthesize_override_decision``
+# path the Phase 5 UI-05 override uses, runs both lanes CONCURRENTLY
+# through the existing single-adapter streaming stack, and multiplexes
+# their chunks into ONE SSE response where every event carries a ``lane``
+# discriminator (0 / 1) so the 2-up UI (and the Next /compare proxy) can
+# demux. Reuses ``EventSourceResponse(ping=15)``, the per-turn cost cap
+# (T-07-17), and the cancellation path (T-07-19).
+
+
+class CompareRequest(BaseModel):
+    """Body of ``POST /api/v1/threads/{thread_id}/compare``.
+
+    Fields:
+      message:      The shared user prompt streamed to BOTH lanes.
+      models:       Exactly two model IDs — one per Compare column. Each
+                    is validated against ``_compare_model_allowlist()``
+                    BEFORE dispatch (T-07-16 SSRF/over-fetch guard); an
+                    off-list or wrong-cardinality list returns 422.
+      max_cost_usd: Optional PER-LANE cost cap override; falls back to
+                    ``settings.default_max_cost_usd`` then
+                    ``DEFAULT_PER_TURN_COST_USD`` — identical precedence
+                    to the single-turn path so Compare never bypasses the
+                    cost cap (T-07-17). The cap applies to EACH lane.
+    """
+
+    message: str
+    models: list[str]
+    max_cost_usd: float | None = None
+
+
+def _compare_lane_payload(lane: int, chunk: ChatChunk) -> dict[str, Any]:
+    """Serialise a ChatChunk for a Compare lane, tagging it with ``lane``.
+
+    The single-turn path yields ``chunk.model_dump_json()`` verbatim; for
+    Compare we splice a ``lane`` key into the same payload so the client
+    can demux the interleaved 0/1 streams without a separate framing
+    channel (the SSE ``event:`` name still keys the chunk type).
+    """
+
+    payload = chunk.model_dump()
+    payload["lane"] = lane
+    return payload
+
+
+@router.post("/threads/{thread_id}/compare", response_model=None)
+async def post_compare(
+    thread_id: str, body: CompareRequest, request: Request
+) -> EventSourceResponse:
+    """Stream two labeled completion lanes for one prompt as SSE.
+
+    Pre-stream errors (D-08 HTTPException path — BEFORE the SSE opens):
+      - 404 thread not found.
+      - 422 if ``models`` is not exactly two ids, or if EITHER id is not
+        in ``_compare_model_allowlist()`` (T-07-16 — the client cannot
+        force an arbitrary upstream model).
+
+    Per lane (0 and 1), the multiplexed stream carries:
+        routing_decision (forced-model echo) → >=1 text_delta → done
+    each event's data payload tagged with ``lane: 0|1``.
+
+    The two lanes run CONCURRENTLY (``asyncio`` tasks feeding a shared
+    queue) so this is a genuine parallel-completions path; on client
+    disconnect / cancellation BOTH lane tasks are cancelled (T-07-19).
+    """
+
+    app = request.app
+    db = app.state.db
+
+    # ----------------------------------------------------------------
+    # Pre-stream sanity (D-08 HTTPException path)
+    # ----------------------------------------------------------------
+
+    thread = await get_thread(db, thread_id)
+    if thread is None:
+        raise HTTPException(status_code=404, detail="thread not found")
+
+    # Exactly two models — the handoff Compare view is 2-up only
+    # (RESEARCH Deferred: Compare across >2 models is out of scope).
+    if len(body.models) != 2:
+        raise HTTPException(
+            status_code=422,
+            detail="compare requires exactly two model ids",
+        )
+
+    # T-07-16 SSRF/over-fetch guard: BOTH forced model ids must be in the
+    # known allowlist. Reject off-list ids (422) BEFORE any dispatch so a
+    # client can never force an arbitrary upstream model.
+    allowlist = _compare_model_allowlist()
+    off_list = [m for m in body.models if m not in allowlist]
+    if off_list:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                "compare model(s) not in the allowed set: "
+                f"{', '.join(off_list)}"
+            ),
+        )
+
+    turn_id = secrets.token_urlsafe(12)
+    logger.info(
+        "compare_start thread_id=%s user_msg_len=%d models=%s turn_id=%s",
+        thread_id,
+        len(body.message),
+        body.models,
+        turn_id,
+    )
+
+    history_rows = await get_thread_messages(db, thread_id)
+    adapter_history = [
+        AdapterMessage(role=m.role, content=m.text) for m in history_rows
+    ]
+
+    # Per-lane forced-model decisions via the reused override synth. Both
+    # allowlisted slugs are OpenRouter aggregator models, so each lane
+    # dispatches through the single ``openrouter`` adapter with its slug
+    # forced. (Compare bypasses decide() ranking — the user picked the two
+    # models explicitly — but still goes through _enabled_backends below.)
+    lane_decisions: list[RoutingDecision] = [
+        _synthesize_override_decision("openrouter", body.models[0]),
+        _synthesize_override_decision("openrouter", body.models[1]),
+    ]
+
+    # _enabled_backends floors at ["openrouter"] so the Compare backend is
+    # always reachable; the lazy adapter cache + key/import error handling
+    # is reused verbatim. The adapter is shared across both lanes (one
+    # OpenRouter adapter instance), which is safe — each .stream() call is
+    # an independent async generator.
+    enabled = _enabled_backends(app.state.settings)
+    if "openrouter" not in enabled:
+        # Defensive: the floor guarantees this is unreachable, but keep a
+        # clean error rather than a half-opened stream if it ever changes.
+        raise HTTPException(
+            status_code=400,
+            detail="openrouter backend is required for compare",
+        )
+    adapter = await _get_or_create_adapter(app, "openrouter")
+
+    # Per-lane cost cap — identical precedence to the single-turn path
+    # (T-07-17): body > settings > DEFAULT_PER_TURN_COST_USD. Applied to
+    # EACH lane so two parallel completions never bypass the cap.
+    default_cap = app.state.settings.get("default_max_cost_usd")
+    if body.max_cost_usd is not None:
+        max_cost_usd = body.max_cost_usd
+    elif default_cap is not None:
+        max_cost_usd = default_cap
+    else:
+        max_cost_usd = DEFAULT_PER_TURN_COST_USD
+
+    async def lane_stream(
+        lane: int, decision: RoutingDecision, queue: asyncio.Queue
+    ) -> None:
+        """Drive one lane's adapter stream, pushing lane-tagged events.
+
+        Emits the routing_decision event FIRST (so the column can label
+        itself before the first token), then forwards each adapter chunk
+        as a lane-tagged SSE event, stopping on the terminal Done. A
+        per-lane StreamError+Done pair is emitted on cancellation or
+        adapter failure so each column terminates cleanly and the
+        consumer's done-count reaches two.
+        """
+
+        options = AdapterOptions(
+            model=decision.model_or_agent,
+            max_cost_usd=max_cost_usd,
+            max_steps=None,
+            cwd=None,
+            routing_signals=decision.signals,
+        )
+
+        # routing_decision FIRST — echo the forced model id per lane so
+        # the 2-up UI labels each column (test_compare_echoes_forced_model).
+        await queue.put(
+            ServerSentEvent(
+                event="routing_decision",
+                data=json.dumps(
+                    {
+                        "lane": lane,
+                        "backend": decision.backend,
+                        "model_or_agent": decision.model_or_agent,
+                        "rationale": decision.rationale,
+                        "confidence": decision.confidence,
+                        "signals": decision.signals,
+                    }
+                ),
+            )
+        )
+        try:
+            async for chunk in adapter.stream(
+                body.message, adapter_history, options
+            ):
+                if isinstance(chunk, Screenshot):
+                    chunk = _maybe_externalize_screenshot(chunk)
+                await queue.put(
+                    ServerSentEvent(
+                        event=chunk.type,
+                        data=json.dumps(_compare_lane_payload(lane, chunk)),
+                    )
+                )
+                if isinstance(chunk, Done):
+                    return
+        except asyncio.CancelledError:
+            # T-07-19: client disconnect cancels both lanes. Emit a
+            # terminal pair so the consumer sees the lane close, THEN
+            # re-raise so the adapter's own CancelledError handler closes
+            # the provider connection within the cancellation budget.
+            err = StreamError(
+                code="cancelled",
+                message="Compare lane cancelled by caller.",
+                retriable=True,
+            )
+            await queue.put(
+                ServerSentEvent(
+                    event=err.type,
+                    data=json.dumps(_compare_lane_payload(lane, err)),
+                )
+            )
+            done = Done(routing_signals=decision.signals)
+            await queue.put(
+                ServerSentEvent(
+                    event=done.type,
+                    data=json.dumps(_compare_lane_payload(lane, done)),
+                )
+            )
+            raise
+        except Exception as exc:  # noqa: BLE001 — surface as StreamError
+            # An adapter-level failure on one lane must not abort the
+            # other. Emit StreamError + terminal Done for THIS lane so the
+            # column renders an error and the consumer's done-count still
+            # reaches two.
+            logger.warning(
+                "compare lane %d failed turn_id=%s: %s", lane, turn_id, exc
+            )
+            err = StreamError(
+                code="internal_error",
+                message="Compare lane failed.",
+                retriable=True,
+            )
+            await queue.put(
+                ServerSentEvent(
+                    event=err.type,
+                    data=json.dumps(_compare_lane_payload(lane, err)),
+                )
+            )
+
+        # Natural end without a terminal Done (defensive — adapters honor
+        # the D-04 terminal-Done invariant, but a custom fake might not):
+        # synthesise one so the lane closes and the consumer unblocks.
+        done = Done(routing_signals=decision.signals)
+        await queue.put(
+            ServerSentEvent(
+                event=done.type,
+                data=json.dumps(_compare_lane_payload(lane, done)),
+            )
+        )
+
+    async def compare_stream():
+        """Multiplex the two concurrent lanes into one SSE stream.
+
+        A shared ``asyncio.Queue`` collects lane-tagged events from both
+        lane tasks; this generator drains the queue until both lanes have
+        emitted their terminal Done. On cancellation both lane tasks are
+        cancelled (T-07-19).
+        """
+
+        queue: asyncio.Queue = asyncio.Queue()
+        tasks = [
+            asyncio.ensure_future(lane_stream(0, lane_decisions[0], queue)),
+            asyncio.ensure_future(lane_stream(1, lane_decisions[1], queue)),
+        ]
+        done_lanes = 0
+        try:
+            while done_lanes < 2:
+                # Drain queued events; stop once both lanes have signalled
+                # their terminal Done. Use a short timeout so a stalled
+                # lane cannot wedge the drain loop forever while the other
+                # lane is still producing.
+                try:
+                    event = await asyncio.wait_for(queue.get(), timeout=30.0)
+                except asyncio.TimeoutError:
+                    if all(t.done() for t in tasks):
+                        break
+                    continue
+                yield event
+                if event.event == "done":
+                    done_lanes += 1
+            # Flush any events the lane tasks enqueued between the final
+            # ``done`` dequeue and loop exit (terminal Done is always last
+            # per lane, so this is normally empty).
+            while not queue.empty():
+                yield queue.get_nowait()
+        except asyncio.CancelledError:
+            # Propagate cancellation to BOTH lanes (T-07-19) then re-raise.
+            for t in tasks:
+                t.cancel()
+            raise
+        finally:
+            for t in tasks:
+                if not t.done():
+                    t.cancel()
+            # Await the lane tasks so their CancelledError handlers (which
+            # close provider connections) run before the response closes.
+            await asyncio.gather(*tasks, return_exceptions=True)
+            logger.info(
+                "compare_done thread_id=%s turn_id=%s lanes_completed=%d",
+                thread_id,
+                turn_id,
+                done_lanes,
+            )
+
+    return EventSourceResponse(compare_stream(), ping=15)

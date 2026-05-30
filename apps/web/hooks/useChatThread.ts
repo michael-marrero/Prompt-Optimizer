@@ -31,7 +31,7 @@
 //     target which the route handler proxies — see Plan 04-03)
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { AssistantRuntime } from "@assistant-ui/react";
 import {
   AssistantChatTransport,
@@ -40,6 +40,7 @@ import {
 } from "@assistant-ui/react-ai-sdk";
 import type { UIMessage } from "@ai-sdk/react";
 import { getOrCreateDefaultThread } from "@/lib/thread-id";
+import type { Backend } from "@/lib/types";
 
 // useChatRuntime's typed options surface omits `experimental_throttle`
 // because it lives on @ai-sdk/react's UseChatOptions, not on the upstream
@@ -53,13 +54,55 @@ type ThrottleableOptions = UseChatRuntimeOptions<UIMessage> & {
 export interface UseChatThreadResult {
   runtime: AssistantRuntime;
   threadId: string | null;
+  /** Phase 5 (UI-05, D-02): force the backend for the NEXT turn only. The
+   *  OverrideDropdown + slash-command parsing call this to set
+   *  override_backend; it is injected into the next /api/chat body and reset
+   *  to undefined immediately after the send dispatches (one-shot). Pass null
+   *  to clear (Auto). */
+  setOverrideBackend: (backend: Backend | null) => void;
+  /** The currently-armed one-shot override (null = Auto). Mirrors the ref so
+   *  the OverrideDropdown trigger label stays in sync. */
+  overrideBackend: Backend | null;
 }
 
-export function useChatThread(): UseChatThreadResult {
+// Phase 8 Plan 08-03 (D-06 / SC-3): the hook now accepts the sidebar-selected
+// `activeThreadId` and the reconstructed `initialMessages` so a restored thread
+// (a) seeds the runtime with its prior turns and (b) points the composer's next
+// POST at the active/restored thread rather than the localStorage default.
+//   - `initialMessages` is threaded into the runtime options as `messages` —
+//     `useChatRuntime` spreads `...options` into `useChat` and `ChatInit.messages`
+//     is a real field, so the seed lands in the rendered thread state (RESEARCH
+//     §Pattern 2; GATED + PROVEN by the 08-00 spike — A1 PASS).
+//   - `activeThreadId` is synced into `threadIdRef` via a `[activeThreadId]`
+//     effect (Pitfall 4 / D-06). The existing `prepareSendMessagesRequest` reads
+//     `threadIdRef.current`, so the next POST picks up the synced id through the
+//     ref closure with NO transport recreation. ChatSurface also remounts this
+//     hook with `key={activeThreadId}`, so the ref re-initializes per thread
+//     anyway — the effect is the belt for an id change within a single mount.
+//   - When `activeThreadId` is null (a brand-new session), the existing
+//     `getOrCreateDefaultThread` first-mount effect still provides the default
+//     thread, so a fresh chat is unaffected (fallback intact).
+export function useChatThread(
+  activeThreadId?: string | null,
+  initialMessages?: UIMessage[],
+): UseChatThreadResult {
   const [threadId, setThreadId] = useState<string | null>(null);
   // Ref so prepareSendMessagesRequest closes over the latest value without
   // having to re-create the transport on every re-render.
   const threadIdRef = useRef<string | null>(null);
+
+  // Phase 5 (UI-05, D-02) — the one-shot forced backend. The ref is read inside
+  // prepareSendMessagesRequest (which closes over it once) so a value set
+  // between renders is still injected on the next POST; the `overrideBackend`
+  // state mirrors it for the OverrideDropdown trigger label.
+  const overrideRef = useRef<Backend | null>(null);
+  const [overrideBackend, setOverrideBackendState] = useState<Backend | null>(
+    null,
+  );
+  const setOverrideBackend = useCallback((backend: Backend | null): void => {
+    overrideRef.current = backend;
+    setOverrideBackendState(backend);
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -81,24 +124,75 @@ export function useChatThread(): UseChatThreadResult {
     };
   }, []);
 
+  // D-06 (Pitfall 4) — point the transport's thread id at the sidebar-selected
+  // `activeThreadId` so the composer's next POST continues the active/restored
+  // thread, not the localStorage default. Mirrors the first-mount effect shape
+  // (`threadIdRef.current = id; setThreadId(id)`). The ref closure means
+  // prepareSendMessagesRequest (line ~138, `threadId: threadIdRef.current`)
+  // picks this up on the next send with no transport recreation. When
+  // `activeThreadId` is null we leave the default-thread fallback above in
+  // control (so a brand-new session keeps its default thread).
+  useEffect(() => {
+    if (activeThreadId) {
+      threadIdRef.current = activeThreadId;
+      setThreadId(activeThreadId);
+    }
+  }, [activeThreadId]);
+
   // Hooks must be called unconditionally — we always invoke useChatRuntime,
   // even before threadId is resolved. The transport injects the LATEST
   // threadId at request time via the ref closure.
   const transport = useRef(
     new AssistantChatTransport({
       api: "/api/chat",
-      prepareSendMessagesRequest: ({ messages, body }) => ({
-        body: { ...(body ?? {}), messages, threadId: threadIdRef.current },
-      }),
+      prepareSendMessagesRequest: ({ messages, body }) => {
+        // Inject the one-shot override_backend alongside threadId, then reset
+        // the ref so the override applies to EXACTLY this turn (D-02). The
+        // chat proxy (05-03) only forwards override_backend when it is a
+        // non-empty string, so omitting it (undefined) keeps auto-routing.
+        const override = overrideRef.current;
+        overrideRef.current = null;
+        // Mirror the reset into state so the dropdown trigger snaps back to
+        // Auto after dispatch. Scheduled async to avoid a setState-in-render
+        // warning from the transport call site.
+        // WR-04: guard the mirror on the ref STILL being null at microtask
+        // time. If the user re-arms an override between this synchronous
+        // reset and the microtask running, an unconditional
+        // setOverrideBackendState(null) would clobber the freshly-armed
+        // value (label snaps to "Auto" while the next send still forces the
+        // armed backend — state and ref transiently disagree).
+        if (override !== null) {
+          queueMicrotask(() => {
+            if (overrideRef.current === null) setOverrideBackendState(null);
+          });
+        }
+        return {
+          body: {
+            ...(body ?? {}),
+            messages,
+            threadId: threadIdRef.current,
+            ...(override ? { override_backend: override } : {}),
+          },
+        };
+      },
     }),
   ).current;
 
+  // Seed the runtime with the reconstructed history when present (08-03 / D-04).
+  // `useChatRuntime` spreads `...options` into `useChat`, and `ChatInit.messages`
+  // is a real field, so the seeded `messages` array becomes the initial thread
+  // state and the prior turns render through the unchanged bubbles (RESEARCH
+  // §Pattern 2; A1 spike PASS). The conditional spread keeps a brand-new thread
+  // (no `initialMessages`) on the exact pre-08-03 options shape. The
+  // `key={activeThreadId}` remount in ChatSurface re-runs this hook per thread,
+  // so each thread select re-seeds atomically from the freshly-fetched rows.
   const options: ThrottleableOptions = {
     transport,
     experimental_throttle: 50,
+    ...(initialMessages ? { messages: initialMessages } : {}),
   };
 
   const runtime = useChatRuntime(options);
 
-  return { runtime, threadId };
+  return { runtime, threadId, setOverrideBackend, overrideBackend };
 }

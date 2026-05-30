@@ -74,9 +74,9 @@ export function StreamErrorBanner({
   return (
     <div
       role="alert"
-      className="mt-3 first:mt-0 flex items-start gap-3 rounded-md border border-red-300 bg-red-50 p-3 text-sm text-red-900"
+      className="mt-3 first:mt-0 flex items-start gap-3 rounded-md border border-[var(--danger)]/40 bg-[var(--danger)]/10 p-3 text-sm text-[var(--danger)]"
     >
-      <AlertCircle className="h-4 w-4 text-red-600 flex-shrink-0 mt-0.5" />
+      <AlertCircle className="h-4 w-4 text-[var(--danger)] flex-shrink-0 mt-0.5" />
       <div className="flex-1 leading-relaxed">
         {friendly}{" "}
         <code className="font-mono text-xs">({code})</code>
@@ -85,7 +85,7 @@ export function StreamErrorBanner({
             type="button"
             onClick={onRetry}
             aria-label="Retry the failed turn"
-            className="mt-2 inline-flex h-8 items-center rounded-md border border-red-300 bg-white px-3 text-xs font-semibold text-red-900 hover:bg-red-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-400 focus-visible:ring-offset-2"
+            className="mt-2 inline-flex h-8 items-center rounded-md border border-[var(--danger)]/40 bg-white px-3 text-xs font-semibold text-[var(--danger)] hover:bg-[var(--danger)]/15 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--danger)] focus-visible:ring-offset-2"
           >
             Try again
           </button>

@@ -118,13 +118,28 @@ def create_app() -> FastAPI:
     # inside the factory (not at module top) to avoid a circular-
     # import surface area if a future route ever pulls from
     # ``apps.api.main``.
-    from apps.api.routes import health, rename, settings, threads, turn
+    # Phase 5 grew this list with ``feedback`` (POST /api/v1/feedback
+    # append endpoint, 05-01) and ``blobs`` (GET /api/v1/blobs/{hash}
+    # byte-serving endpoint, built by 05-02 and mounted here — 05-01
+    # owns the single ``include_router`` edit so the two Wave-1/2 plans
+    # never both touch ``main.py``, avoiding a double-registration race).
+    from apps.api.routes import (
+        blobs,
+        feedback,
+        health,
+        rename,
+        settings,
+        threads,
+        turn,
+    )
 
     app.include_router(health.router)
     app.include_router(threads.router)
     app.include_router(settings.router)
     app.include_router(turn.router)
     app.include_router(rename.router)
+    app.include_router(feedback.router)
+    app.include_router(blobs.router)
 
     return app
 

@@ -9,6 +9,15 @@ import { resolve } from "node:path";
 
 const useMock = process.env.USE_MOCK_FASTAPI === "1";
 
+// Plan 06-04 — local screenshot capture mode. capture-screenshots.capture.ts
+// is a LOCAL authoring tool (writes docs/img/*.png), NOT a CI gate. Its
+// `.capture.ts` suffix already escapes the default `testMatch: /.*\.spec\.ts/`,
+// so the normal `pnpm test:e2e` run never discovers it. CAPTURE_SCREENSHOTS=1
+// opts the `.capture.ts` files INTO testMatch so an explicit-path capture run
+// resolves; when the flag is unset we additionally `testIgnore` them (a
+// defensive double-guard — RESEARCH Pitfall 4).
+const capturing = process.env.CAPTURE_SCREENSHOTS === "1";
+
 // Playwright resolves `cwd` relative to the CONFIG file. The config lives
 // at apps/web/playwright/playwright.config.ts, so we compute REPO_ROOT
 // explicitly to avoid the "../../ = apps/" off-by-one trap.
@@ -48,7 +57,12 @@ const FASTAPI_URL = useMock
 
 export default defineConfig({
   testDir: ".",
-  testMatch: /.*\.spec\.ts/,
+  // Normal runs match only `*.spec.ts`. In CAPTURE_SCREENSHOTS mode also match
+  // `*.capture.ts` so the local screenshot tool is discoverable by explicit path.
+  testMatch: capturing ? /.*\.(spec|capture)\.ts/ : /.*\.spec\.ts/,
+  // Defensive double-guard: when NOT capturing, ignore the `.capture.ts`
+  // authoring tool so it can never accidentally gate a CI run (Pitfall 4).
+  testIgnore: capturing ? undefined : /.*\.capture\.ts/,
   fullyParallel: false,
   workers: 1,
   reporter: process.env.CI ? "github" : "list",

@@ -63,8 +63,8 @@ export function NetworkDownBanner(): React.JSX.Element | null {
       aria-live="polite"
       className="mx-auto max-w-3xl px-4 mb-2"
     >
-      <div className="flex items-center gap-3 rounded-md border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-900">
-        <WifiOff className="h-4 w-4 text-red-600" />
+      <div className="flex items-center gap-3 rounded-md border border-[var(--danger)]/40 bg-[var(--danger)]/10 px-3 py-2 text-sm text-[var(--danger)]">
+        <WifiOff className="h-4 w-4 text-[var(--danger)]" />
         <span>API unavailable — is uvicorn running?</span>
       </div>
     </div>

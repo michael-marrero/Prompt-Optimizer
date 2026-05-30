@@ -109,3 +109,202 @@ export const UNKNOWN_EVENT =
 // Translator should skip silently — no chunk emitted.
 export const HEARTBEAT =
   ':ping\n\n';
+
+// --------------------------------------------------------------------
+// Phase 5 — full per-backend turn fixtures (drive the bubble component tests)
+// --------------------------------------------------------------------
+//
+// Each ordered array is the exact byte sequence a real FastAPI turn emits for
+// the given backend, in stream order. Component tests feed these through the
+// same fake-ReadableStream → translateNamedSSEToUIMessageStream path the
+// sse-translate tests already use, OR parse the payloads directly to build the
+// `useMessage().content` data-part array (RoutingChip.tsx:85-91 pattern).
+//
+// Event names match `sse-translate.ts` exactly (routing_decision, tool_call,
+// tool_result, file_diff, screenshot, text_delta, done). Payload field names
+// match `chunk-schemas.ts` exactly:
+//   - file_diff:  {tool_call_id, path, diff, operation}
+//   - screenshot: {step, image_b64?, image_ref?, image_format}
+//   - tool_call:  {tool_call_id, tool_name, arguments}
+
+// --------------------------------------------------------------------
+// claude_code turn — routing_decision (green/claude_code) + tool_call +
+// tool_result + file_diff + final text_delta + done.
+// Drives CodeBubble (UI-09, UI-SPEC §7).
+// --------------------------------------------------------------------
+
+export const CLAUDE_CODE_ROUTING_DECISION_EVENT =
+  'event: routing_decision\ndata: {"backend":"claude_code","model_or_agent":"claude-code","rationale":"Build-and-edit coding task","confidence":0.94,"signals":{"task_type":"coding","agentic_intent":true,"rule_fired":"coding_task"}}\n\n';
+
+export const CLAUDE_CODE_TOOL_CALL_EVENT =
+  'event: tool_call\ndata: {"type":"tool_call","tool_call_id":"tc_cc_001","tool_name":"edit_file","arguments":{"path":"src/app.py","instruction":"add a budget total"}}\n\n';
+
+export const CLAUDE_CODE_TOOL_RESULT_EVENT =
+  'event: tool_result\ndata: {"type":"tool_result","tool_call_id":"tc_cc_001","content":"Applied edit to src/app.py","is_error":false}\n\n';
+
+export const CLAUDE_CODE_FILE_DIFF_EVENT =
+  'event: file_diff\ndata: {"type":"file_diff","tool_call_id":"tc_cc_001","path":"src/app.py","diff":"@@ -1,2 +1,3 @@\\n context_line\\n-old_total = 0\\n+total = sum(amounts)\\n+return total","operation":"edit"}\n\n';
+
+export const CLAUDE_CODE_TEXT_DELTA_EVENT =
+  'event: text_delta\ndata: {"type":"text_delta","text":"I added a budget total to your finance tracker."}\n\n';
+
+export const CLAUDE_CODE_DONE_EVENT =
+  'event: done\ndata: {"type":"done","tokens_in":120,"tokens_out":64,"cost_usd":0.0085,"latency_ms":4200,"routing_signals":{"task_type":"coding","agentic_intent":true,"rule_fired":"coding_task"}}\n\n';
+
+// Full ordered claude_code turn (routing → tool_call → tool_result → file_diff
+// → text_delta → done). Import this array to render a complete CodeBubble.
+export const CLAUDE_CODE_TURN_EVENTS = [
+  CLAUDE_CODE_ROUTING_DECISION_EVENT,
+  CLAUDE_CODE_TOOL_CALL_EVENT,
+  CLAUDE_CODE_TOOL_RESULT_EVENT,
+  CLAUDE_CODE_FILE_DIFF_EVENT,
+  CLAUDE_CODE_TEXT_DELTA_EVENT,
+  CLAUDE_CODE_DONE_EVENT,
+] as const;
+
+// Pre-built `useMessage().content`-shaped data-part array for the claude_code
+// turn — mirrors what `convertMessage` produces (data-<event> → {type:"data",
+// name:"<event>", data}). CodeBubble reads tool_call / file_diff / text parts
+// off this shape (RoutingChip.tsx:85-91 + PATTERNS data-part subscription).
+export const CLAUDE_CODE_CONTENT_PARTS = [
+  {
+    type: "data",
+    name: "routing",
+    data: {
+      backend: "claude_code",
+      model_or_agent: "claude-code",
+      rationale: "Build-and-edit coding task",
+      confidence: 0.94,
+      signals: { task_type: "coding", agentic_intent: true, rule_fired: "coding_task" },
+    },
+  },
+  {
+    type: "data",
+    name: "tool_call",
+    data: {
+      type: "tool_call",
+      tool_call_id: "tc_cc_001",
+      tool_name: "edit_file",
+      arguments: { path: "src/app.py", instruction: "add a budget total" },
+    },
+  },
+  {
+    type: "data",
+    name: "tool_result",
+    data: {
+      type: "tool_result",
+      tool_call_id: "tc_cc_001",
+      content: "Applied edit to src/app.py",
+      is_error: false,
+    },
+  },
+  {
+    type: "data",
+    name: "file_diff",
+    data: {
+      type: "file_diff",
+      tool_call_id: "tc_cc_001",
+      path: "src/app.py",
+      diff: "@@ -1,2 +1,3 @@\n context_line\n-old_total = 0\n+total = sum(amounts)\n+return total",
+      operation: "edit",
+    },
+  },
+  {
+    type: "text",
+    text: "I added a budget total to your finance tracker.",
+  },
+] as const;
+
+// --------------------------------------------------------------------
+// computer_use turn — routing_decision (amber/computer_use) + screenshot with
+// inline image_b64 + screenshot with image_ref only (≥256KB → externalized,
+// served from /api/blobs/{hash}) + text_delta + done.
+// Drives ComputerUseBubble (UI-10, UI-SPEC §8).
+// --------------------------------------------------------------------
+
+export const COMPUTER_USE_ROUTING_DECISION_EVENT =
+  'event: routing_decision\ndata: {"backend":"computer_use","model_or_agent":"computer-use","rationale":"Browse-and-act task","confidence":0.88,"signals":{"task_type":"agentic","agentic_intent":true,"rule_fired":"browse_keyword"}}\n\n';
+
+// First screenshot — small, shipped inline as base64 (1x1 transparent PNG).
+export const COMPUTER_USE_SCREENSHOT_INLINE_EVENT =
+  'event: screenshot\ndata: {"type":"screenshot","step":1,"image_b64":"iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=","image_ref":null,"image_format":"png"}\n\n';
+
+// Second screenshot — large (≥256KB) so the adapter externalized it to the blob
+// store: image_b64 is null, image_ref carries the content hash. The thumbnail
+// must resolve to `/api/blobs/{hash}` (RESEARCH Pitfall 1, UI-SPEC §8.2).
+export const COMPUTER_USE_SCREENSHOT_REF_EVENT =
+  'event: screenshot\ndata: {"type":"screenshot","step":2,"image_b64":null,"image_ref":"a1b2c3d4e5f60718293a4b5c6d7e8f90112233445566778899aabbccddeeff00","image_format":"png"}\n\n';
+
+export const COMPUTER_USE_TEXT_DELTA_EVENT =
+  'event: text_delta\ndata: {"type":"text_delta","text":"The price on the page is $42.00."}\n\n';
+
+export const COMPUTER_USE_DONE_EVENT =
+  'event: done\ndata: {"type":"done","tokens_in":210,"tokens_out":48,"cost_usd":0.0190,"latency_ms":7800,"routing_signals":{"task_type":"agentic","agentic_intent":true,"rule_fired":"browse_keyword"}}\n\n';
+
+// Full ordered computer_use turn (routing → inline screenshot → image_ref
+// screenshot → text_delta → done). Import to render a complete ComputerUseBubble.
+export const COMPUTER_USE_TURN_EVENTS = [
+  COMPUTER_USE_ROUTING_DECISION_EVENT,
+  COMPUTER_USE_SCREENSHOT_INLINE_EVENT,
+  COMPUTER_USE_SCREENSHOT_REF_EVENT,
+  COMPUTER_USE_TEXT_DELTA_EVENT,
+  COMPUTER_USE_DONE_EVENT,
+] as const;
+
+// The bare sha256 stem the second screenshot externalizes to. The
+// ComputerUseBubble test asserts the thumbnail src resolves to
+// `/api/blobs/${COMPUTER_USE_SCREENSHOT_REF_HASH}` (the bare stem the
+// blob endpoint contracts on).
+export const COMPUTER_USE_SCREENSHOT_REF_HASH =
+  "a1b2c3d4e5f60718293a4b5c6d7e8f90112233445566778899aabbccddeeff00";
+
+// BL-01: the backend stores `image_ref` as the bare content KEY
+// (`<sha>.<ext>`), and the bubble strips the extension to the bare stem
+// before building the proxy URL. This fixture carries the wire shape
+// (with extension) so the test exercises the strip.
+export const COMPUTER_USE_SCREENSHOT_REF_KEY = `${COMPUTER_USE_SCREENSHOT_REF_HASH}.png`;
+
+// Pre-built `useMessage().content`-shaped data-part array for the computer_use
+// turn — one inline screenshot (image_b64) and one image_ref-only screenshot.
+// `status` is left open so the test can assert the "still working…" indicator
+// (role="status") while incomplete and the metrics footer once done.
+export const COMPUTER_USE_CONTENT_PARTS = [
+  {
+    type: "data",
+    name: "routing",
+    data: {
+      backend: "computer_use",
+      model_or_agent: "computer-use",
+      rationale: "Browse-and-act task",
+      confidence: 0.88,
+      signals: { task_type: "agentic", agentic_intent: true, rule_fired: "browse_keyword" },
+    },
+  },
+  {
+    type: "data",
+    name: "screenshot",
+    data: {
+      type: "screenshot",
+      step: 1,
+      image_b64:
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=",
+      image_ref: null,
+      image_format: "png",
+    },
+  },
+  {
+    type: "data",
+    name: "screenshot",
+    data: {
+      type: "screenshot",
+      step: 2,
+      image_b64: null,
+      image_ref: COMPUTER_USE_SCREENSHOT_REF_KEY,
+      image_format: "png",
+    },
+  },
+  {
+    type: "text",
+    text: "The price on the page is $42.00.",
+  },
+] as const;

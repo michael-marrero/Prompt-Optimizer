@@ -90,7 +90,7 @@ Cross-refs:
 from __future__ import annotations
 
 import logging
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import APIRouter, Request
 from pydantic import BaseModel, ConfigDict
@@ -153,6 +153,14 @@ class SettingsPatch(BaseModel):
     backends_enabled: dict[str, bool] | None = None
     computer_use_opt_in: bool | None = None
     default_max_cost_usd: float | None = None
+    # Phase 7 (07-07) routing preferences — non-secret; JSON-Merge-Patched and
+    # persisted to settings.json, then threaded into decide() (ROUTER-06,
+    # quality-first). Constrained to the locked enum / booleans so a client
+    # cannot smuggle an arbitrary priority (extra="forbid" still rejects unknown
+    # top-level keys with 422).
+    priority: Literal["quality", "balanced", "speed", "cost"] | None = None
+    cost_aware_fallback: bool | None = None
+    zero_data_retention: bool | None = None
 
 
 # --------------------------------------------------------------------
@@ -212,6 +220,14 @@ def _mask_settings_for_response(settings: dict, keystore: Any) -> dict:
         ),
         "default_max_cost_usd": settings.get(
             "default_max_cost_usd", defaults["default_max_cost_usd"]
+        ),
+        # Phase 7 routing preferences (non-secret; round-trip in GET/PATCH).
+        "priority": settings.get("priority", defaults.get("priority", "quality")),
+        "cost_aware_fallback": settings.get(
+            "cost_aware_fallback", defaults.get("cost_aware_fallback", False)
+        ),
+        "zero_data_retention": settings.get(
+            "zero_data_retention", defaults.get("zero_data_retention", False)
         ),
     }
 

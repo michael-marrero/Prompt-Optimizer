@@ -511,7 +511,13 @@ async def test_delete_unlinks_blobs(
             assert image_ref is not None, (
                 "Screenshot event must carry image_ref for >=256KB payload"
             )
-            ref_path = Path(image_ref)
+            # BL-01: image_ref is the bare content key (`<sha>.<ext>`),
+            # not an absolute path. Re-anchor to BLOBS_DIR.
+            assert "/" not in image_ref and "\\" not in image_ref, (
+                f"image_ref must be the bare content key, not a path; "
+                f"got {image_ref!r}"
+            )
+            ref_path = BLOBS_DIR / image_ref
             assert ref_path.exists(), (
                 f"blob file must exist on disk at {ref_path} after turn"
             )

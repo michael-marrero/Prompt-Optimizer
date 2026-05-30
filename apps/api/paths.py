@@ -67,3 +67,19 @@ WORKSPACES_DIR: Path = USER_HOME / "workspaces"
 # ``.gitignore``'s ``.planning/data/`` rule so per-turn routing
 # decisions never enter git history.
 JSONL_LOG_PATH: Path = PROJECT_ROOT / ".planning" / "data" / "routing_decisions.jsonl"
+
+# Routing-feedback log (D-14). The browser cannot write the
+# filesystem, so ``POST /api/v1/feedback`` appends the D-12
+# full-context row here (UI-15, D-11..D-14).
+#
+# Anchored on ``USER_HOME`` (not ``PROJECT_ROOT``) so the
+# ``PROMPT_OPTIMIZER_HOME`` env override redirects the feedback log the
+# same way it redirects the DB / blobs / settings. ``JSONL_LOG_PATH``
+# is repo-relative because the routing-decisions log is a developer
+# offline-analysis artifact tied to the checkout; the feedback log is
+# per-user runtime data (it travels with the user's home, and tests
+# that set ``PROMPT_OPTIMIZER_HOME`` expect the file under that
+# override — see ``test_feedback.py::test_feedback_home_override_redirects_file``).
+# A ``.planning/data`` subpath is kept so the gitignore rule and the
+# D-14 "sibling of routing_decisions" naming both still read true.
+FEEDBACK_LOG_PATH: Path = USER_HOME / ".planning" / "data" / "routing_feedback.jsonl"

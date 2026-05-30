@@ -56,6 +56,8 @@ Cross-refs:
 
 from __future__ import annotations
 
+from typing import Literal
+
 from fastapi import APIRouter, HTTPException, Request, Response
 from pydantic import BaseModel
 
@@ -64,6 +66,7 @@ from apps.api.db.queries import (
     create_thread,
     delete_thread,
     get_thread,
+    get_thread_messages_with_routing,
     list_threads,
     update_thread_title,
 )
@@ -108,6 +111,54 @@ class ThreadListResponse(BaseModel):
     """
 
     threads: list[Thread]
+
+
+class RoutingSummary(BaseModel):
+    """The per-assistant routing facet of ``GET /threads/{id}/messages``.
+
+    Phase 8 D-01: the restored routing pill needs the decision's
+    ``rationale`` plus whether the user manually overrode the auto
+    route. ``override`` is recovered server-side from the persisted
+    ``signals`` JSON (``signals.override``; the override path also sets
+    ``rationale == "user override"``).
+    """
+
+    rationale: str
+    override: bool
+
+
+class MessageWithRouting(BaseModel):
+    """One row of ``GET /api/v1/threads/{id}/messages`` (Phase 8 SC-1).
+
+    Distinct from the frozen ``apps.api.db.models.Message`` for two
+    reasons (RESEARCH anti-pattern — do NOT reuse ``Message`` verbatim):
+
+      * ``content_blocks`` is the PARSED ``list[dict]`` here, not the
+        raw JSON ``str`` the ``Message`` row carries (``models.py:88``);
+        the query ``json.loads``'d it so the client renders chunks
+        without double-parsing (Pitfall 3).
+      * ``routing`` is a derived facet absent from the ``messages``
+        table — present (``RoutingSummary``) for an assistant turn with
+        a routing-decision JOIN match, ``None`` for user rows.
+
+    The optional metric/metadata fields mirror the nullable columns on
+    the ``messages`` table so a restored transcript can show the same
+    cost / latency / token chips a live turn shows.
+    """
+
+    id: str
+    role: Literal["user", "assistant"]
+    text: str
+    content_blocks: list[dict]  # PARSED array — NOT Message.content_blocks: str
+    backend_used: str | None = None
+    model_used: str | None = None
+    cost_usd: float | None = None
+    latency_ms: int | None = None
+    tokens_in: int | None = None
+    tokens_out: int | None = None
+    created_at: str
+    status: Literal["complete", "error", "cancelled"] = "complete"
+    routing: RoutingSummary | None = None
 
 
 # --------------------------------------------------------------------
@@ -159,6 +210,34 @@ async def get_single_thread(thread_id: str, request: Request) -> Thread:
     if thread is None:
         raise HTTPException(status_code=404, detail="thread not found")
     return thread
+
+
+@router.get("/threads/{thread_id}/messages")
+async def get_thread_messages_endpoint(
+    thread_id: str, request: Request
+) -> list[MessageWithRouting]:
+    """Return a thread's persisted messages chronologically (Phase 8 SC-1).
+
+    D-01: each assistant row carries its ``routing`` decision (rationale
+    + manual-override flag) from the ``routing_decisions`` LEFT JOIN, so
+    the client can restore the full transcript — including each routing
+    pill — without a second request. ``content_blocks`` arrives parsed
+    (a ``list``, not the raw DB JSON string — Pitfall 3).
+
+    **404-ordering hazard (RESEARCH §Pattern 4):** call ``get_thread``
+    FIRST and 404 on an unknown id, mirroring ``get_single_thread``. A
+    real-but-EMPTY thread instead returns ``200 []`` — the empty result
+    is a valid state the query returns, NOT a not-found. Ordering the
+    existence check before the message query is what distinguishes the
+    D-03 empty-state from a genuine 404 for the client.
+    """
+
+    db = request.app.state.db
+    # Existence precheck BEFORE the message query: unknown id → 404,
+    # real-but-empty thread → 200 [] (the query returns []).
+    if await get_thread(db, thread_id) is None:
+        raise HTTPException(status_code=404, detail="thread not found")
+    return await get_thread_messages_with_routing(db, thread_id)
 
 
 @router.patch("/threads/{thread_id}")

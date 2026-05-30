@@ -142,17 +142,23 @@ async def get_thread(
 async def list_threads(
     db: aiosqlite.Connection, *, limit: int = 100, offset: int = 0
 ) -> list[Thread]:
-    """Return threads ordered newest-first.
+    """Return threads ordered by most-recent activity first.
 
-    ``ORDER BY created_at DESC`` matches the Phase 4 chat sidebar
-    expectation (most-recent on top). ``limit`` / ``offset`` are
-    bound via parameterised placeholders, never string interpolation.
+    ``ORDER BY updated_at DESC`` makes the sidebar show the
+    most-recently-active thread on top (Phase 5 D-05 sidebar discretion
+    / Pitfall 3): a thread bumps its ``updated_at`` on every new turn
+    (see ``persist_turn``) and on rename, so an old thread the user just
+    posted to floats back to the top. Server-side ordering is
+    authoritative — the client need not re-sort. At creation
+    ``updated_at == created_at`` so a never-touched thread still sorts by
+    creation recency. ``limit`` / ``offset`` are bound via parameterised
+    placeholders, never string interpolation.
     """
 
     threads: list[Thread] = []
     async with db.execute(
         "SELECT id, title, created_at, updated_at FROM threads"
-        " ORDER BY created_at DESC"
+        " ORDER BY updated_at DESC"
         " LIMIT ? OFFSET ?",
         (limit, offset),
     ) as cur:
@@ -224,6 +230,18 @@ async def delete_thread(
           traversal defense at unlink time)
     """
 
+    # Step 0 (CR-01): confirm the thread exists BEFORE any filesystem
+    # mutation. The blob unlink in Step 2 is irreversible; running it for
+    # an unknown id (or before confirming the row exists) risks deleting
+    # blob files while reporting a result that depends on the later
+    # DELETE rowcount. Short-circuiting here makes the unknown-id case
+    # idempotent (returns False, touches nothing) and keeps the
+    # docstring's contract honest regardless of aiosqlite rowcount
+    # quirks.
+    thread = await get_thread(db, thread_id)
+    if thread is None:
+        return False
+
     # Step 1: collect every blob ref referenced by this thread's
     # messages BEFORE we delete the rows (otherwise the cascade would
     # nuke our source of truth for the ref paths).
@@ -245,13 +263,43 @@ async def delete_thread(
     # any ref that resolves outside BLOBS_DIR (tampered DB row) is
     # SKIPPED, never touched. ``missing_ok=True`` makes this safe to
     # replay even if a prior partial delete already removed the file.
+    #
+    # WR-06: blobs are content-addressed, so two threads producing
+    # byte-identical screenshots SHARE one blob file (the transcoder
+    # short-circuits on ``target.exists()``). Before unlinking, confirm
+    # no SURVIVING message in another thread still references the same
+    # blob; otherwise deleting thread A would 404 thread B's screenshot.
+    # We match on the bare blob filename (the content key) appearing in
+    # any other thread's ``content_blocks`` JSON.
     for ref in refs_to_unlink:
-        if _is_inside_blobs_dir(ref):
-            ref.unlink(missing_ok=True)
-        else:
+        if not _is_inside_blobs_dir(ref):
             logger.warning(
                 "skipping unlink of out-of-bounds blob ref: %s", ref
             )
+            continue
+
+        # Reference-count guard: does any message OUTSIDE this thread
+        # still cite this blob? ``content_blocks`` stores the bare key
+        # (``<sha>.<ext>``), so a substring LIKE on the filename is a
+        # sound liveness probe. The sha256 stem makes false-positive
+        # collisions astronomically unlikely.
+        like_needle = f"%{ref.name}%"
+        async with db.execute(
+            "SELECT 1 FROM messages"
+            " WHERE thread_id != ? AND content_blocks LIKE ? LIMIT 1",
+            (thread_id, like_needle),
+        ) as ref_cur:
+            still_referenced = await ref_cur.fetchone()
+
+        if still_referenced is not None:
+            logger.info(
+                "skipping unlink of shared blob still referenced by"
+                " another thread: %s",
+                ref.name,
+            )
+            continue
+
+        ref.unlink(missing_ok=True)
 
     # Step 3: DB DELETE — FK CASCADE handles messages +
     # routing_decisions in one statement.
@@ -303,6 +351,106 @@ async def get_thread_messages(
                 )
             )
     return messages
+
+
+async def get_thread_messages_with_routing(
+    db: aiosqlite.Connection, thread_id: str
+) -> list[dict]:
+    """Return one thread's messages (oldest-first) with the routing JOIN.
+
+    Phase 8 D-01 / SC-1: the chat-history restore read seam. Each row
+    is the persisted ``messages`` shape PLUS a ``routing`` sub-object
+    carrying the assistant turn's rationale + manual-override flag,
+    pulled from a ``LEFT JOIN routing_decisions``. One JOIN delivers the
+    full fidelity the restored routing pill needs (D-01 resolves the
+    SC-1 "rows" vs SC-3 "reconstruct" tension in favour of fidelity).
+
+    Returns plain ``dict`` rows (NOT the frozen ``Message`` model) because
+    the response shape diverges from the DB row twice:
+
+      * ``content_blocks`` is ``json.loads``'d into a parsed ``list``
+        rather than the raw JSON string the DB column stores (RESEARCH
+        Pitfall 3 — returning the string would force the client to
+        double-parse and breaks the SC-1 parsed-list assertion). The
+        empty / NULL case guards to ``[]``.
+      * ``routing`` is a derived sub-object absent from the ``messages``
+        table. It is built ONLY for an assistant row that has a matching
+        ``routing_decisions`` row (``r.rationale IS NOT NULL`` after the
+        LEFT JOIN); user rows (and any assistant row with no decision)
+        carry ``routing = None``. ``override`` recovers the boolean from
+        the JSON ``signals`` dict (``insert_routing_decision`` serialises
+        ``signals`` via ``json.dumps``; the override path writes
+        ``rationale="user override"`` / ``signals={"override": True}`` —
+        ``turn.py:_synthesize_override_decision``).
+
+    ``ORDER BY m.created_at ASC`` is prefix-matched by the
+    ``idx_messages_thread_id_created_at`` composite index (schema_v1).
+    ``thread_id`` is bound via the parameterised ``?`` placeholder —
+    never f-string interpolation (T-03-SQLi; module docstring above).
+
+    Returns ``[]`` for a thread with no messages — the 404 decision for
+    an UNKNOWN thread id is the route handler's job (it prechecks via
+    ``get_thread``), so this query never raises for an empty result.
+
+    Cross-refs:
+        - 08-CONTEXT.md D-01 (full routing fidelity via LEFT JOIN)
+        - 08-RESEARCH.md §"Pattern 4", §"Pitfall 3"
+        - 08-PATTERNS.md §"queries.py — add get_thread_messages_with_routing"
+    """
+
+    rows: list[dict] = []
+    async with db.execute(
+        "SELECT m.id, m.thread_id, m.role, m.content_blocks, m.text,"
+        " m.backend_used, m.model_used, m.cost_usd, m.latency_ms,"
+        " m.tokens_in, m.tokens_out, m.created_at, m.status,"
+        " r.rationale, r.signals"
+        " FROM messages m"
+        " LEFT JOIN routing_decisions r ON r.message_id = m.id"
+        " WHERE m.thread_id = ?"
+        " ORDER BY m.created_at ASC",
+        (thread_id,),
+    ) as cur:
+        async for row in cur:
+            # Graceful degradation (DoS-tolerance, RESEARCH § Security Domain):
+            # a single corrupt JSON cell must not 500 the whole history load.
+            try:
+                content_blocks = json.loads(row[3]) if row[3] else []
+            except (json.JSONDecodeError, TypeError):
+                logger.warning("corrupt content_blocks for message %s; returning []", row[0])
+                content_blocks = []
+            routing: dict | None = None
+            # Build routing ONLY for an assistant row WITH a join match.
+            # ``r.rationale`` (row[13]) is NULL for user rows and for any
+            # assistant row lacking a routing_decisions entry.
+            if row[2] == "assistant" and row[13] is not None:
+                try:
+                    signals = json.loads(row[14]) if row[14] else {}
+                except (json.JSONDecodeError, TypeError):
+                    logger.warning("corrupt routing signals for message %s; treating as {}", row[0])
+                    signals = {}
+                routing = {
+                    "rationale": row[13],
+                    "override": bool(signals.get("override")),
+                }
+            rows.append(
+                {
+                    "id": row[0],
+                    "thread_id": row[1],
+                    "role": row[2],
+                    "content_blocks": content_blocks,
+                    "text": row[4],
+                    "backend_used": row[5],
+                    "model_used": row[6],
+                    "cost_usd": row[7],
+                    "latency_ms": row[8],
+                    "tokens_in": row[9],
+                    "tokens_out": row[10],
+                    "created_at": row[11],
+                    "status": row[12],
+                    "routing": routing,
+                }
+            )
+    return rows
 
 
 # --------------------------------------------------------------------
@@ -520,6 +668,16 @@ async def persist_turn(
             decision_id=routing_decision_id,
             message_id=assistant_message_id,
             decision=decision,
+        )
+        # Phase 5 (Pitfall 3 / D-05): bump the thread's ``updated_at``
+        # so a new turn floats the thread back to the top of the
+        # recency-ordered sidebar (``list_threads`` orders by
+        # ``updated_at DESC``). Uses the same ``_now_iso()`` expression
+        # ``update_thread_title`` uses. Kept INSIDE this transaction so
+        # it rolls back atomically with the message inserts on failure.
+        await db.execute(
+            "UPDATE threads SET updated_at = ? WHERE id = ?",
+            (_now_iso(), thread_id),
         )
         await db.commit()
     except Exception:
