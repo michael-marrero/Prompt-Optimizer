@@ -60,6 +60,17 @@ class AdapterOptions:
     caps inside each adapter package. ``None`` here means "use the
     default" — the adapter's ``stream`` is responsible for picking the
     fallback.
+
+    ``wall_clock_s`` / ``usd_backstop`` (Phase 9, RELI-02) are the
+    per-backend kill-switch ceilings enforced by the ``turn.py``
+    orchestration loop, NOT by the adapters. They are SEPARATE, higher
+    ceilings than ``max_cost_usd`` — ``usd_backstop`` is the turn-level
+    runaway-spend backstop that surfaces ``budget_exceeded`` (D-05),
+    distinct from the adapter's own ``cost_cap_exceeded`` accounting.
+    The dataclass-level defaults here are the chat-tier D-04 starting
+    values (120s / $0.50); ``turn.py``'s per-backend resolver overrides
+    them from env (agents default 600s / $2.00). They carry defaults so
+    the frozen dataclass stays constructible with no args.
     """
 
     model: str | None = None
@@ -67,6 +78,10 @@ class AdapterOptions:
     max_steps: int | None = None
     cwd: str | None = None
     routing_signals: dict[str, Any] | None = None
+    # RELI-02 per-backend kill-switch ceilings (resolved per turn in
+    # turn.py from env knobs; D-04 chat-tier defaults below).
+    wall_clock_s: float = 120.0
+    usd_backstop: float = 0.50
 
 
 class BackendAdapter(Protocol):

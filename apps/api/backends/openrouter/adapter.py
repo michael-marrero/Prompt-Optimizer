@@ -172,6 +172,14 @@ class OpenRouterAdapter:
         return AsyncOpenAI(
             base_url=OPENROUTER_BASE_URL,
             api_key=api_key,
+            # RELI-01 / RESEARCH Pitfall 1: pin the SDK retry budget to
+            # zero so the application-level retry loop in turn.py is the
+            # SOLE retry authority. The openai SDK default is
+            # max_retries=2 with its own exponential backoff; left unset
+            # it silently stacks under the D-02 3-attempt loop (up to ~9
+            # upstream calls against a hard-down provider, shattering the
+            # ~10-15s worst-case budget). Adapters stay single-attempt.
+            max_retries=0,
             default_headers={
                 "HTTP-Referer": HTTP_REFERER,
                 "X-Title": X_TITLE,

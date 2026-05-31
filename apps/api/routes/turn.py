@@ -134,6 +134,8 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
+import random
 import secrets
 from typing import Any, Literal
 
@@ -148,6 +150,7 @@ from apps.api.backends.chunks import (
     StreamError,
 )
 from apps.api.backends.cost import DEFAULT_PER_TURN_COST_USD
+from apps.api.backends.logging_filter import _redact_text
 from apps.api.backends.protocol import AdapterOptions
 from apps.api.backends.protocol import Message as AdapterMessage
 from apps.api.blobs import _maybe_externalize_screenshot
@@ -214,6 +217,89 @@ _OVERRIDE_DEFAULTS: dict[str, str] = {
     "claude_code": "claude-agent-sdk",
     "computer_use": "computer-use-2025-11-24",
 }
+
+
+# --------------------------------------------------------------------
+# RELI-01 retry-loop constants (D-02) + RELI-02 per-backend ceilings (D-04)
+# --------------------------------------------------------------------
+
+
+# D-02: up to 3 total attempts (2 retries), base 0.5s, cap 8s, full
+# jitter. Worst-case ~10-15s before a graceful terminal error keeps
+# interactive chat responsive. Implemented with stdlib ``random`` —
+# no library (RESEARCH State of the Art: full-jitter is
+# random.uniform(0, min(cap, base*2**attempt))).
+RETRY_BASE_S: float = 0.5
+RETRY_CAP_S: float = 8.0
+RETRY_MAX_ATTEMPTS: int = 3
+
+
+# Per-backend wall-clock + USD kill-switch ceilings (RELI-02, D-04).
+# Starting defaults: OpenRouter chat is short-lived (120s / $0.50);
+# Claude Code + computer-use agents run longer multi-step workflows
+# (600s / $2.00). The ``usd_backstop`` is a SEPARATE, higher ceiling
+# than the per-turn ``max_cost_usd`` cost cap — it is the runaway-spend
+# backstop that surfaces ``budget_exceeded`` (D-05), NOT
+# ``cost_cap_exceeded``. Each is overridable from env per A5/D-04.
+_BACKEND_CEILING_DEFAULTS: dict[str, tuple[float, float]] = {
+    # backend: (wall_clock_s, usd_backstop)
+    "openrouter": (120.0, 0.50),
+    "claude_code": (600.0, 2.00),
+    "computer_use": (600.0, 2.00),
+}
+
+# Env knob names per backend (planner's discretion per D-04/A5). Absent
+# env var → the D-04 starting default; present env var → its value.
+_BACKEND_CEILING_ENV: dict[str, tuple[str, str]] = {
+    # backend: (wall_clock_env, usd_env)
+    "openrouter": ("RELI_OPENROUTER_WALL_S", "RELI_OPENROUTER_USD"),
+    "claude_code": ("RELI_CLAUDE_CODE_WALL_S", "RELI_CLAUDE_CODE_USD"),
+    "computer_use": ("RELI_COMPUTER_USE_WALL_S", "RELI_COMPUTER_USE_USD"),
+}
+
+
+def _resolve_env_float(name: str, default: float) -> float:
+    """Return ``float(os.environ[name])`` or ``default`` when unset/invalid.
+
+    A malformed env value (non-numeric) falls back to the D-04 default
+    rather than crashing the turn — the ceiling is a safety backstop, so
+    a typo in a knob must never take the kill-switch offline.
+    """
+
+    raw = os.environ.get(name)
+    if raw is None or raw == "":
+        return default
+    try:
+        return float(raw)
+    except ValueError:
+        logger.warning(
+            "ignoring non-numeric %s=%r — using default %s",
+            name,
+            raw,
+            default,
+        )
+        return default
+
+
+def _resolve_backend_ceilings(backend: str) -> tuple[float, float]:
+    """Resolve ``(wall_clock_s, usd_backstop)`` for ``backend`` (RELI-02).
+
+    Reads the per-backend env knobs (``RELI_<BACKEND>_WALL_S`` /
+    ``RELI_<BACKEND>_USD``); each falls back to the D-04 starting default
+    (``_BACKEND_CEILING_DEFAULTS``) when its env var is unset. An unknown
+    backend (unreachable in normal flow — the Backend literal constrains
+    the value) falls back to the conservative chat-tier defaults.
+    """
+
+    wall_default, usd_default = _BACKEND_CEILING_DEFAULTS.get(
+        backend, (120.0, 0.50)
+    )
+    wall_env, usd_env = _BACKEND_CEILING_ENV.get(
+        backend, ("RELI_OPENROUTER_WALL_S", "RELI_OPENROUTER_USD")
+    )
+    wall_clock_s = _resolve_env_float(wall_env, wall_default)
+    usd_backstop = _resolve_env_float(usd_env, usd_default)
+    return wall_clock_s, usd_backstop
 
 
 def _synthesize_override_decision(
@@ -666,6 +752,13 @@ async def post_turn(
     else:
         max_cost_usd = DEFAULT_PER_TURN_COST_USD
 
+    # RELI-02: resolve the per-backend wall-clock + USD kill-switch
+    # ceilings from env (D-04 defaults when unset). These are SEPARATE,
+    # higher ceilings than ``max_cost_usd`` — the turn-level runaway
+    # backstop that surfaces wall_clock_exceeded / budget_exceeded, NOT
+    # the adapter's own cost_cap_exceeded.
+    wall_clock_s, usd_backstop = _resolve_backend_ceilings(decision.backend)
+
     options = AdapterOptions(
         model=decision.model_or_agent,
         max_cost_usd=max_cost_usd,
@@ -677,6 +770,8 @@ async def post_turn(
         # Phase 2 default tmpdir is fine for v1.
         cwd=None,
         routing_signals=decision.signals,
+        wall_clock_s=wall_clock_s,
+        usd_backstop=usd_backstop,
     )
 
     # ----------------------------------------------------------------

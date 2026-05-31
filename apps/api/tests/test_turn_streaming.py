@@ -1401,3 +1401,62 @@ async def test_budget_exceeded_distinct_from_cost_cap(
         "budget_exceeded is the turn kill-switch, distinct from the "
         "adapter-level cost_cap_exceeded"
     )
+
+
+# =====================================================================
+# Phase 9 09-02 Task 1 — per-backend kill-switch ceiling resolver
+# =====================================================================
+#
+# RELI-02 / D-04: AdapterOptions exposes wall_clock_s + usd_backstop with
+# per-backend defaults resolved from env. Absent env var → the D-04
+# starting default; present env var → its value. These assert the
+# resolver wiring directly (Task 1 acceptance criterion 3).
+
+
+def test_resolve_backend_ceilings_env_override(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``RELI_OPENROUTER_WALL_S=5`` resolves a 5.0s deadline; unset → 120.0."""
+
+    from apps.api.routes.turn import _resolve_backend_ceilings
+
+    # Unset → D-04 chat-tier defaults (120s / $0.50).
+    monkeypatch.delenv("RELI_OPENROUTER_WALL_S", raising=False)
+    monkeypatch.delenv("RELI_OPENROUTER_USD", raising=False)
+    wall, usd = _resolve_backend_ceilings("openrouter")
+    assert wall == 120.0
+    assert usd == 0.50
+
+    # Present → its value.
+    monkeypatch.setenv("RELI_OPENROUTER_WALL_S", "5")
+    monkeypatch.setenv("RELI_OPENROUTER_USD", "0.25")
+    wall, usd = _resolve_backend_ceilings("openrouter")
+    assert wall == 5.0, "RELI_OPENROUTER_WALL_S=5 must resolve a 5.0s deadline"
+    assert usd == 0.25
+
+
+def test_resolve_backend_ceilings_agent_defaults(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Claude Code / computer-use default to the longer D-04 agent ceilings."""
+
+    from apps.api.routes.turn import _resolve_backend_ceilings
+
+    for backend in ("claude_code", "computer_use"):
+        monkeypatch.delenv(
+            f"RELI_{backend.upper()}_WALL_S", raising=False
+        )
+        monkeypatch.delenv(f"RELI_{backend.upper()}_USD", raising=False)
+        wall, usd = _resolve_backend_ceilings(backend)
+        assert wall == 600.0, f"{backend} wall-clock default is 600s (D-04)"
+        assert usd == 2.00, f"{backend} USD backstop default is $2.00 (D-04)"
+
+
+def test_adapter_options_constructible_with_no_ceiling_args() -> None:
+    """The frozen AdapterOptions stays constructible with no args (defaults)."""
+
+    from apps.api.backends.protocol import AdapterOptions
+
+    opts = AdapterOptions()
+    assert opts.wall_clock_s == 120.0
+    assert opts.usd_backstop == 0.50
