@@ -202,7 +202,15 @@ class OpenRouterAdapter:
         """
 
         model_id = options.model or "openai/gpt-5"
-        max_cost_usd = options.max_cost_usd or self._max_cost
+        # DEBT-02: honor an explicit 0.0 as a hard "spend nothing" cap.
+        # ``or`` would treat 0.0 as falsy and silently fall back to the
+        # adapter default; an explicit ``is not None`` check mirrors the
+        # turn.py request->cap ladder (CR-02).
+        max_cost_usd = (
+            options.max_cost_usd
+            if options.max_cost_usd is not None
+            else self._max_cost
+        )
         tracker = OpenRouterCostTracker(
             model_id=model_id,
             max_cost_usd=max_cost_usd,

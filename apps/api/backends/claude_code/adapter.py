@@ -296,7 +296,13 @@ class ClaudeCodeAdapter:
             cleanup_workspace = True
 
         # ----- Stage 2: tracker + step counter --------------------------
-        max_cost_usd = options.max_cost_usd or self._max_cost
+        # DEBT-02: honor an explicit 0.0 as a hard cap (``or`` treats 0.0
+        # as falsy); mirrors the turn.py request->cap ladder (CR-02).
+        max_cost_usd = (
+            options.max_cost_usd
+            if options.max_cost_usd is not None
+            else self._max_cost
+        )
         max_steps = options.max_steps or self._max_steps
         tracker = ClaudeCodeCostTracker(
             model_id=options.model or "claude-agent-sdk",

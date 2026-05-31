@@ -796,10 +796,6 @@ async def test_cost_cap_zero_honored(fake_screen):
     of spend trips ``cost_cap_exceeded``.
     """
 
-    pytest.xfail(
-        "Wave 0 RED — DEBT-02 falsy-0 cost cap not yet fixed (computer_use)"
-    )
-
     # Default adapter cap is 0.50; pass an explicit 0.0 via options.
     adapter, _client = _build_adapter(
         fake_screen=fake_screen,

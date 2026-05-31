@@ -44,10 +44,6 @@ async def test_max_cost_usd_zero_honored(fake_openai_factory) -> None:
     ``cost_cap_exceeded`` before a clean Done.
     """
 
-    pytest.xfail(
-        "Wave 0 RED — DEBT-02 falsy-0 cost cap not yet fixed (openrouter)"
-    )
-
     # Construct with the default high cap; the 0.0 arrives via options.
     adapter = OpenRouterAdapter(
         api_key="fake",

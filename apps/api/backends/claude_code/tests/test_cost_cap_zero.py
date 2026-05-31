@@ -45,10 +45,6 @@ async def test_max_cost_usd_zero_honored(fake_client_factory) -> None:
     default cap.
     """
 
-    pytest.xfail(
-        "Wave 0 RED — DEBT-02 falsy-0 cost cap not yet fixed (claude_code)"
-    )
-
     # Construct with the default high cap; the 0.0 arrives via options.
     adapter = ClaudeCodeAdapter(
         max_cost_usd=0.50,
