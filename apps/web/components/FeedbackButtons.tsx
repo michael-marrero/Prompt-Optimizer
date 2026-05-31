@@ -3,9 +3,16 @@
 // Thumbs-up / thumbs-down on every assistant message, mounted in the action
 // row next to Copy + Regenerate. Reads the routing decision off the message's
 // content array (the SAME data-part pattern RoutingChip uses,
-// RoutingChip.tsx:82-95) plus the message.id, and POSTs the D-12 feedback row
-// to the same-origin /api/feedback proxy (UI-17 — the browser never speaks to
-// FastAPI directly; the proxy forwards to POST /api/v1/feedback).
+// RoutingChip.tsx:82-95), and POSTs the D-12 feedback row to the same-origin
+// /api/feedback proxy (UI-17 — the browser never speaks to FastAPI directly;
+// the proxy forwards to POST /api/v1/feedback).
+//
+// DEBT-04 (Phase 9): the `message_id` join key is the SERVER-assigned
+// assistant message id — read from the live Done chunk's assistant_message_id
+// data part, or (on a reloaded turn) from message.id which reconstructUIMessages
+// already seeds from the DB row id. The assistant-ui RUNTIME message.id is
+// never used as the join key for a live turn (it would not join back to the
+// persisted message row — Phase 5 WR-01).
 //
 // D-11 (AUTHORITATIVE over UI-SPEC §13): BOTH thumbs log. UI-SPEC §13 reserved
 // up-logging for v2 and called up "silent", but CONTEXT D-11 is a locked user
@@ -62,6 +69,18 @@ function isRoutingPart(
 ): p is DataPart & { readonly name: "routing"; readonly data: RoutingDecision } {
   return p.type === "data" && (p as { name?: string }).name === "routing";
 }
+// DEBT-04: the server-assigned assistant message id arrives as a data part
+// named "assistant_message_id" (sse-translate.ts emits `data-assistant_message_id`
+// on the live Done; `convertParts` strips the `data-` prefix to this `name`).
+function isAssistantIdPart(
+  p: PartLike,
+): p is DataPart & { readonly name: "assistant_message_id"; readonly data: string } {
+  return (
+    p.type === "data" &&
+    (p as { name?: string }).name === "assistant_message_id" &&
+    typeof (p as { data?: unknown }).data === "string"
+  );
+}
 function isTextPart(p: PartLike): p is TextPart {
   return p.type === "text";
 }
@@ -85,7 +104,17 @@ export function FeedbackButtons({
 }: FeedbackButtonsProps = {}): React.JSX.Element {
   const message = useMessage({ optional: true }) as MessageStateShape | null;
   const content = message?.content ?? [];
-  const messageId = message?.id ?? "";
+
+  // DEBT-04 — the feedback join key MUST be the SERVER-assigned assistant
+  // message id, never the assistant-ui runtime `message.id`.
+  //   - LIVE turn: the server id rides the Done chunk as a data part
+  //     (assistant_message_id); read it off the content.
+  //   - RELOADED turn: reconstructUIMessages seeds `message.id` from the DB
+  //     row id (already the server id), so the fallback stays correct.
+  // The runtime id is never used as the join key (it would break the
+  // offline-analysis join for live turns — Phase 5 WR-01 / T-09-09).
+  const serverIdPart = content.find(isAssistantIdPart);
+  const messageId = serverIdPart?.data ?? message?.id ?? "";
 
   const routingPart = content.find(isRoutingPart);
   const decision = routingPart?.data ?? null;

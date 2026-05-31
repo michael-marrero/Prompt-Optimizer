@@ -13,9 +13,11 @@
 // the server-assigned id sourced from the Done chunk's
 // `assistant_message_id`, NOT the assistant-ui `message.id`.
 //
-// RED convention: `it.fails(...)` so the slice is COLLECTABLE and reports
-// failing (RED) against today's component (which sends the runtime id).
-// The owning plan removes the `.fails` marker when the rewire lands.
+// History: shipped as an `it.fails(...)` RED slice in Plan 01 (collectable +
+// reporting RED against the baseline component, which sent the runtime id).
+// Plan 04 landed the rewire and removed the `.fails` marker (a green assertion
+// now): FeedbackButtons reads the server id from the assistant_message_id data
+// part (live) or message.id seeded from the DB row id (reload).
 //
 // This file is intentionally `.ts` (no JSX) per the plan's file list;
 // it renders via React.createElement.
@@ -83,8 +85,8 @@ afterEach(() => {
 });
 
 describe("DEBT-04 — feedback join key uses the server assistant_message_id", () => {
-  it.fails(
-    "POSTs message_id == Done.assistant_message_id (server id), not the runtime message.id (RED until Plan 04)",
+  it(
+    "POSTs message_id == Done.assistant_message_id (server id), not the runtime message.id (GREEN — Plan 04)",
     () => {
       render(
         createElement<FeedbackButtonsProps>(FeedbackButtons, {

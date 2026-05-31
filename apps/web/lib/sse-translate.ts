@@ -204,6 +204,20 @@ export function translateNamedSSEToUIMessageStream(
                     },
                   }),
                 );
+                // DEBT-04: surface the server-assigned assistant_message_id (new
+                // optional Done field, Plan 01) as a data part so FeedbackButtons
+                // joins live-turn feedback to the persisted message row by the
+                // SERVER id, not the runtime message.id. Emitted ONLY when present
+                // so the existing Done chunk-count contract is unchanged for the
+                // (legacy) Done-without-id fixtures.
+                if (parsed.data.assistant_message_id) {
+                  controller.enqueue(
+                    emit({
+                      type: "data-assistant_message_id",
+                      data: parsed.data.assistant_message_id,
+                    }),
+                  );
+                }
                 controller.enqueue(emit({ type: "finish" }));
                 // Literal AI SDK v6 terminator sentinel.
                 controller.enqueue(encoder.encode("data: [DONE]\n\n"));
