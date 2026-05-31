@@ -1266,10 +1266,10 @@ async def test_wall_clock_exceeded_emitted(
     the provider-level ``timeout`` code.
     """
 
-    pytest.xfail(
-        "Wave 0 RED — RELI-02 wall-clock kill-switch not yet wired "
-        "(Plan 02-03)"
-    )
+    # Pin a small per-turn wall-clock so the 30s-stalling fake trips the
+    # deadline well inside the @pytest.mark.timeout(10) budget. The
+    # resolver reads this env knob at AdapterOptions construction (Task 1).
+    monkeypatch.setenv("RELI_OPENROUTER_WALL_S", "1")
 
     app = _fresh_app(monkeypatch, tmp_path)
 
@@ -1336,16 +1336,13 @@ async def test_budget_exceeded_distinct_from_cost_cap(
     adapter's cap.
     """
 
-    pytest.xfail(
-        "Wave 0 RED — RELI-02 budget kill-switch not yet wired (Plan 02-03)"
-    )
-
     app = _fresh_app(monkeypatch, tmp_path)
 
     from apps.api.backends.chunks import Done, TextDelta
     from apps.api.tests.fake_adapter import FakeStreamingAdapter
 
-    # A Done reporting spend that crosses the turn-level backstop.
+    # A Done reporting spend that crosses the turn-level backstop
+    # (default openrouter usd_backstop is $0.50; 999.0 >> 0.50).
     fake = FakeStreamingAdapter(
         [
             TextDelta(text="expensive"),

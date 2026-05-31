@@ -302,6 +302,88 @@ def _resolve_backend_ceilings(backend: str) -> tuple[float, float]:
     return wall_clock_s, usd_backstop
 
 
+# --------------------------------------------------------------------
+# RELI-02 kill-switch terminal-pair emitters (SECURE-07 redacted)
+# --------------------------------------------------------------------
+
+
+def _kill_switch_pair(
+    buffer: list[ChatChunk],
+    decision: RoutingDecision,
+    *,
+    code: str,
+    message: str,
+) -> list[ServerSentEvent]:
+    """Build + buffer a redacted ``StreamError(code) + Done`` terminal pair.
+
+    Shared by the wall-clock and USD kill-switches. ``message`` is ALWAYS
+    routed through ``_redact_text`` (SECURE-07) so no kill-switch reason
+    can carry an unredacted secret across the SSE boundary. Both chunks
+    are appended to ``buffer`` (so ``persist_turn`` records the terminal
+    Done + the error status) and returned as the two SSE events the
+    caller must yield, in order.
+    """
+
+    err = StreamError(
+        code=code,  # type: ignore[arg-type] — closed D-05 vocabulary
+        message=_redact_text(message),
+        retriable=False,
+    )
+    buffer.append(err)
+    done = Done(routing_signals=decision.signals)
+    buffer.append(done)
+    return [
+        ServerSentEvent(event=err.type, data=err.model_dump_json()),
+        ServerSentEvent(event=done.type, data=done.model_dump_json()),
+    ]
+
+
+def _wall_clock_kill(
+    buffer: list[ChatChunk],
+    decision: RoutingDecision,
+    options: AdapterOptions,
+) -> list[ServerSentEvent]:
+    """Terminal pair for a wall-clock deadline trip (RELI-02, D-05).
+
+    ``code="wall_clock_exceeded"`` is DISTINCT from the provider-level
+    ``timeout`` (D-05 anti-pattern: do not reuse ``timeout`` for the
+    wall-clock kill). The reason is plain-English and redacted.
+    """
+
+    return _kill_switch_pair(
+        buffer,
+        decision,
+        code="wall_clock_exceeded",
+        message=(
+            f"Stopped — this turn hit its {int(options.wall_clock_s)}s limit."
+        ),
+    )
+
+
+def _budget_kill(
+    buffer: list[ChatChunk],
+    decision: RoutingDecision,
+    options: AdapterOptions,
+) -> list[ServerSentEvent]:
+    """Terminal pair for a USD backstop trip (RELI-02, D-05).
+
+    ``code="budget_exceeded"`` is DISTINCT from the adapter-level
+    ``cost_cap_exceeded`` — this is the turn-level runaway-spend
+    kill-switch sitting above the per-turn cost cap. The reason is
+    plain-English and redacted.
+    """
+
+    return _kill_switch_pair(
+        buffer,
+        decision,
+        code="budget_exceeded",
+        message=(
+            "Stopped — this turn reached its "
+            "${:.2f} budget.".format(options.usd_backstop)
+        ),
+    )
+
+
 def _synthesize_override_decision(
     backend: str, model_or_agent: str | None = None
 ) -> RoutingDecision:
@@ -835,9 +917,53 @@ async def post_turn(
                 # (the adapter's terminal pair) must be swallowed too,
                 # never forwarded as a successful completion.
                 retrying = False
-                async for chunk in adapter.stream(
+                # RELI-02 kill-switch terminates the WHOLE turn (not just
+                # this attempt); ``killed`` propagates the break past the
+                # retry loop.
+                killed = False
+                # Manual iteration (not ``async for``) so each pull can be
+                # bounded by ``asyncio.wait_for`` — a provider that hangs
+                # BEFORE yielding any chunk (Pitfall 4) must still trip the
+                # wall-clock deadline. ``asyncio.timeout()`` is 3.11+; the
+                # per-pull ``wait_for`` is the 3.10-safe equivalent
+                # (RESEARCH State of the Art).
+                stream_iter = adapter.stream(
                     body.message, adapter_history, options
-                ):
+                ).__aiter__()
+                while True:
+                    # Remaining wall-clock budget bounds this pull. A
+                    # non-positive remainder means the deadline already
+                    # passed → trip immediately rather than waiting.
+                    remaining = (
+                        options.wall_clock_s
+                        - (asyncio.get_event_loop().time() - start_t)
+                    )
+                    if remaining <= 0:
+                        for ev in _wall_clock_kill(
+                            buffer, decision, options
+                        ):
+                            yield ev
+                        killed = True
+                        break
+                    try:
+                        chunk = await asyncio.wait_for(
+                            stream_iter.__anext__(), timeout=remaining
+                        )
+                    except StopAsyncIteration:
+                        # Generator exhausted naturally — leave the inner
+                        # loop (retry/terminal decision below).
+                        break
+                    except asyncio.TimeoutError:
+                        # Pitfall 4: a pull that out-ran the deadline (e.g.
+                        # a hang before the first chunk) is a wall-clock
+                        # trip, NOT the provider ``timeout`` code (D-05).
+                        for ev in _wall_clock_kill(
+                            buffer, decision, options
+                        ):
+                            yield ev
+                        killed = True
+                        break
+
                     # RELI-01 retry gate: a StreamError seen BEFORE the
                     # first real chunk is an establishment failure. If it
                     # is retriable and we have attempts left, DON'T forward
@@ -872,6 +998,38 @@ async def post_turn(
                     # genuine terminal one.
                     if retrying and isinstance(chunk, Done):
                         continue
+
+                    # RELI-02 wall-clock kill-switch (per-chunk monotonic
+                    # check). Catches a stream that produces MANY fast
+                    # chunks past the deadline (the per-pull wait_for above
+                    # only bounds an inter-chunk hang). The code is DISTINCT
+                    # from the provider ``timeout`` (D-05 anti-pattern: do
+                    # NOT reuse ``timeout`` for the wall-clock kill).
+                    elapsed = asyncio.get_event_loop().time() - start_t
+                    if elapsed > options.wall_clock_s:
+                        for ev in _wall_clock_kill(buffer, decision, options):
+                            yield ev
+                        killed = True
+                        break
+
+                    # RELI-02 USD kill-switch (D-05). A SEPARATE, higher
+                    # ceiling than the adapter's own ``cost_cap_exceeded``
+                    # accounting: when the cumulative provider-reported
+                    # spend for this turn crosses ``usd_backstop``, emit
+                    # ``budget_exceeded`` (NOT ``cost_cap_exceeded``). The
+                    # adapters report authoritative cost on the terminal
+                    # Done (and may report running cost on chunks); read it
+                    # off the chunk and compare to the backstop, mirroring
+                    # CostTracker.over_cap()'s ``total() > ceiling`` predicate.
+                    chunk_cost = getattr(chunk, "cost_usd", None)
+                    if (
+                        chunk_cost is not None
+                        and chunk_cost > options.usd_backstop
+                    ):
+                        for ev in _budget_kill(buffer, decision, options):
+                            yield ev
+                        killed = True
+                        break
 
                     # STORE-04 + D-14: externalize Screenshot chunks
                     # >=256KB BEFORE buffer.append AND BEFORE the SSE yield
@@ -909,10 +1067,13 @@ async def post_turn(
                     if await request.is_disconnected():
                         break
 
-                # Inner stream ended. If this attempt was abandoned for a
-                # retry (retriable pre-first-token failure), re-establish;
-                # otherwise the stream completed (or was forwarded
-                # terminal) — leave the retry loop.
+                # Inner stream ended. A kill-switch trip (wall-clock / USD)
+                # terminated the whole turn — never retry it. Otherwise, if
+                # this attempt was abandoned for a retry (retriable
+                # pre-first-token failure), re-establish; else the stream
+                # completed (or was forwarded terminal) — leave the loop.
+                if killed:
+                    break
                 if retrying and not first_chunk_seen:
                     continue
                 break
@@ -924,7 +1085,11 @@ async def post_turn(
             # within the 2-second BACKEND-07 / API-06 budget.
             err = StreamError(
                 code="cancelled",
-                message="Stream cancelled by caller.",
+                # SECURE-07 uniformity: every StreamError.message
+                # constructed in turn.py routes through _redact_text, even
+                # this static string, so no construction site can ever
+                # carry an unredacted secret.
+                message=_redact_text("Stream cancelled by caller."),
                 retriable=True,
             )
             buffer.append(err)
@@ -1226,7 +1391,10 @@ async def post_compare(
             # the provider connection within the cancellation budget.
             err = StreamError(
                 code="cancelled",
-                message="Compare lane cancelled by caller.",
+                # SECURE-07 uniformity: redact every turn.py StreamError
+                # message at construction, even static ones, so no site
+                # can ever carry an unredacted secret.
+                message=_redact_text("Compare lane cancelled by caller."),
                 retriable=True,
             )
             await queue.put(
@@ -1253,7 +1421,8 @@ async def post_compare(
             )
             err = StreamError(
                 code="internal_error",
-                message="Compare lane failed.",
+                # SECURE-07 uniformity (see lane-cancel site above).
+                message=_redact_text("Compare lane failed."),
                 retriable=True,
             )
             await queue.put(
