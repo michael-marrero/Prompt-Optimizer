@@ -814,36 +814,108 @@ async def post_turn(
 
         buffer: list[ChatChunk] = []
         start_t = asyncio.get_event_loop().time()
+        # RELI-01 (D-01/D-02/D-03): pre-first-token retry loop. ``attempt``
+        # counts establishment tries; ``first_chunk_seen`` is the D-01 gate
+        # — once any non-terminal chunk has reached the wire, a later drop
+        # is TERMINAL (no retry: retrying would replay already-streamed
+        # tokens / re-run side-effecting agent steps; RESEARCH Pitfall 6).
+        # The adapters SWALLOW provider errors and yield a terminal
+        # ``StreamError + Done`` themselves, so the retry decision inspects
+        # the buffered StreamError's ``retriable`` flag (the inherited
+        # classification — D-03; no new code→bool table here) BEFORE
+        # forwarding it. A retriable pre-first-token StreamError is
+        # swallowed (along with the failed attempt's trailing Done) and the
+        # stream is re-established after a full-jitter backoff.
+        attempt = 0
+        first_chunk_seen = False
         try:
-            async for chunk in adapter.stream(
-                body.message, adapter_history, options
-            ):
-                # STORE-04 + D-14: externalize Screenshot chunks
-                # >=256KB BEFORE buffer.append AND BEFORE the SSE yield
-                # so both the wire and the persisted content_blocks
-                # JSON see the image_ref shape. <256KB chunks pass
-                # through unchanged (return-unchanged from the
-                # transcoder). The interception lives here — the
-                # SSE generator is the only callsite per RESEARCH
-                # Pattern 10 lines 635-637.
-                if isinstance(chunk, Screenshot):
-                    chunk = _maybe_externalize_screenshot(chunk)
-                buffer.append(chunk)
-                yield ServerSentEvent(
-                    event=chunk.type,
-                    data=chunk.model_dump_json(),
-                )
-                if isinstance(chunk, Done):
-                    # D-04 terminal-Done invariant — break so the
-                    # finally block fires persist_turn.
-                    break
-                # Defense-in-depth proactive disconnect check.
-                # sse-starlette's own ``_listen_for_disconnect``
-                # handles the real-network case. Under ASGITransport
-                # both polls are no-ops per RESEARCH Pitfall 6;
-                # tests use ``task.cancel()`` to trigger cleanup.
-                if await request.is_disconnected():
-                    break
+            while True:
+                # ``retrying`` marks that THIS attempt already hit a
+                # retriable pre-first-token StreamError; its trailing Done
+                # (the adapter's terminal pair) must be swallowed too,
+                # never forwarded as a successful completion.
+                retrying = False
+                async for chunk in adapter.stream(
+                    body.message, adapter_history, options
+                ):
+                    # RELI-01 retry gate: a StreamError seen BEFORE the
+                    # first real chunk is an establishment failure. If it
+                    # is retriable and we have attempts left, DON'T forward
+                    # it — swallow it, back off (full jitter), and
+                    # re-establish. (D-01: only applies while
+                    # ``not first_chunk_seen``.)
+                    if (
+                        isinstance(chunk, StreamError)
+                        and not first_chunk_seen
+                        and chunk.retriable
+                        and attempt + 1 < RETRY_MAX_ATTEMPTS
+                    ):
+                        # Full jitter (D-02): sleep in
+                        # [0, min(cap, base * 2**attempt)).
+                        backoff = min(
+                            RETRY_CAP_S, RETRY_BASE_S * (2 ** attempt)
+                        )
+                        await asyncio.sleep(random.uniform(0, backoff))
+                        attempt += 1
+                        retrying = True
+                        # Swallow this attempt's terminal pair: skip the
+                        # rest of THIS generator (its trailing Done lands
+                        # next and is dropped by the guard below) and
+                        # re-enter the while loop for a fresh attempt.
+                        continue
+                    # While retrying, drop the failed attempt's trailing
+                    # Done so it is never persisted as a success. This only
+                    # fires for a Done arriving with NO intervening real
+                    # chunk (the adapter's terminal pair after a swallowed
+                    # StreamError). The moment a real chunk is forwarded
+                    # below, ``retrying`` is cleared so the NEXT Done is the
+                    # genuine terminal one.
+                    if retrying and isinstance(chunk, Done):
+                        continue
+
+                    # STORE-04 + D-14: externalize Screenshot chunks
+                    # >=256KB BEFORE buffer.append AND BEFORE the SSE yield
+                    # so both the wire and the persisted content_blocks
+                    # JSON see the image_ref shape. <256KB chunks pass
+                    # through unchanged (return-unchanged from the
+                    # transcoder). The interception lives here — the
+                    # SSE generator is the only callsite per RESEARCH
+                    # Pattern 10 lines 635-637.
+                    if isinstance(chunk, Screenshot):
+                        chunk = _maybe_externalize_screenshot(chunk)
+                    # D-01: the first FORWARDED chunk flips the gate. A
+                    # terminal StreamError forwarded here (non-retriable,
+                    # or attempts exhausted, or post-first-token) does not
+                    # need the gate, but setting it is harmless and keeps
+                    # the invariant simple: past the first yield, no retry.
+                    first_chunk_seen = True
+                    # A real chunk reached the wire — this attempt is the
+                    # winning one; the next Done is the genuine terminal.
+                    retrying = False
+                    buffer.append(chunk)
+                    yield ServerSentEvent(
+                        event=chunk.type,
+                        data=chunk.model_dump_json(),
+                    )
+                    if isinstance(chunk, Done):
+                        # D-04 terminal-Done invariant — break so the
+                        # finally block fires persist_turn.
+                        break
+                    # Defense-in-depth proactive disconnect check.
+                    # sse-starlette's own ``_listen_for_disconnect``
+                    # handles the real-network case. Under ASGITransport
+                    # both polls are no-ops per RESEARCH Pitfall 6;
+                    # tests use ``task.cancel()`` to trigger cleanup.
+                    if await request.is_disconnected():
+                        break
+
+                # Inner stream ended. If this attempt was abandoned for a
+                # retry (retriable pre-first-token failure), re-establish;
+                # otherwise the stream completed (or was forwarded
+                # terminal) — leave the retry loop.
+                if retrying and not first_chunk_seen:
+                    continue
+                break
         except asyncio.CancelledError:
             # Pattern 7 + PEP 789: emit terminal pair into the buffer
             # AND the wire so the client + persistence both see the

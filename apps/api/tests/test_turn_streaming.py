@@ -1135,8 +1135,6 @@ async def test_retry_retriable_establishment_error(
     non-retriable path (covered by the sibling slice).
     """
 
-    pytest.xfail("Wave 0 RED — RELI-01 retry loop not yet wired (Plan 02-03)")
-
     app = _fresh_app(monkeypatch, tmp_path)
 
     from apps.api.backends.chunks import Done, StreamError, TextDelta
@@ -1200,11 +1198,6 @@ async def test_first_token_no_retry(
     already-streamed tokens). The handler surfaces the error and a
     terminal Done; it does NOT re-invoke the adapter.
     """
-
-    pytest.xfail(
-        "Wave 0 RED — RELI-01 first-token no-retry boundary not yet wired "
-        "(Plan 02-03)"
-    )
 
     app = _fresh_app(monkeypatch, tmp_path)
 
