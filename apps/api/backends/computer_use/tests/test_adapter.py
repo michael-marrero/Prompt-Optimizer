@@ -700,3 +700,130 @@ def test_record_iteration_usage_overrides_running_estimate(
     # Override semantics — provider numbers REPLACE the estimate.
     assert tracker.tokens_in() == 10
     assert tracker.tokens_out() == 5
+
+
+# =====================================================================
+# Phase 9 Wave-0 RED test slices — DEBT-01 (wait clamp), DEBT-03
+# (url scheme), DEBT-02 (cost_cap_zero)
+# =====================================================================
+#
+# Scaffolded RED for Phase 9 (VALIDATION.md rows DEBT-01/02/03). Each
+# asserts the TARGET behavior the engineering wave will land and is
+# gated with an imperative ``pytest.xfail(...)`` so the slice is
+# COLLECTABLE by its ``-k`` selector (wait_clamp / url_scheme /
+# cost_cap_zero) and reports ``xfail`` (NOT error, NOT pass) against the
+# unmodified adapter. The owning plan removes the ``pytest.xfail(...)``
+# line when the fix lands.
+
+
+async def test_wait_clamp_duration_ceiling(fake_screen):
+    """DEBT-01 (-k wait_clamp): a computer-use ``wait`` action duration is
+    clamped to a ceiling (WR-01 unbounded-sleep fix).
+
+    Target behavior: when the model issues a ``wait`` action with a
+    large/arbitrary duration, the adapter clamps it to a bounded ceiling
+    before calling ``screen``. Today the duration flows through
+    unbounded — a malicious/confused model could stall the turn for an
+    arbitrary time.
+    """
+
+    pytest.xfail("Wave 0 RED — DEBT-01 wait-duration clamp not yet wired")
+
+    # A tool-use stream issuing a wait with an absurd duration.
+    adapter, _client = _build_adapter(
+        fake_screen=fake_screen,
+        iterations=[
+            make_tool_use_stream(
+                action="wait",
+                action_params={"duration": 100_000},
+            ),
+            make_happy_path_stream(text="done"),
+        ],
+    )
+
+    await _consume(adapter)
+
+    # The clamped duration handed to the screen must not exceed the
+    # ceiling (the exact ceiling constant lands with the fix).
+    assert fake_screen.wait_calls, "expected the wait action to reach the screen"
+    assert max(fake_screen.wait_calls) <= 30.0, (
+        "wait duration must be clamped to a bounded ceiling (DEBT-01)"
+    )
+
+
+async def test_navigation_url_scheme_rejected(fake_screen):
+    """DEBT-03: a navigate action to a dangerous URL scheme is rejected
+    BEFORE ``screen.goto`` (WR-09 arbitrary-scheme fix).
+
+    Target behavior: ``file://``, ``data:``, and ``chrome://`` are
+    rejected; only ``http``/``https`` reach ``goto``. A rejected
+    navigation surfaces a ``validation_error`` StreamError and never
+    calls ``screen.goto`` with the dangerous URL.
+    """
+
+    pytest.xfail("Wave 0 RED — DEBT-03 URL-scheme allowlist not yet wired")
+
+    adapter, _client = _build_adapter(
+        fake_screen=fake_screen,
+        iterations=[
+            make_tool_use_stream(
+                action="navigate",
+                action_params={"url": "file:///etc/passwd"},
+            ),
+            make_happy_path_stream(text="blocked"),
+        ],
+    )
+
+    chunks = await _consume(adapter)
+
+    # screen.goto must NEVER be called with the file:// URL.
+    assert all(
+        not str(u).startswith("file://") for u in fake_screen.goto_calls
+    ), "file:// navigation must be rejected before screen.goto (DEBT-03)"
+    validation_errors = [
+        c
+        for c in chunks
+        if isinstance(c, StreamError) and c.code == "validation_error"
+    ]
+    assert validation_errors, (
+        "a rejected URL scheme must surface a validation_error StreamError"
+    )
+
+
+async def test_cost_cap_zero_honored(fake_screen):
+    """DEBT-02 (-k cost_cap_zero, computer-use): ``max_cost_usd=0.0`` is
+    HONORED, not treated as falsy and replaced by the adapter default.
+
+    Today ``max_cost_usd = options.max_cost_usd or self._max_cost``
+    means a caller-supplied ``0.0`` falls through to the 0.50 default
+    (the falsy-0 bug). Target behavior: a 0.0 cap means the FIRST token
+    of spend trips ``cost_cap_exceeded``.
+    """
+
+    pytest.xfail(
+        "Wave 0 RED — DEBT-02 falsy-0 cost cap not yet fixed (computer_use)"
+    )
+
+    # Default adapter cap is 0.50; pass an explicit 0.0 via options.
+    adapter, _client = _build_adapter(
+        fake_screen=fake_screen,
+        iterations=[
+            make_happy_path_stream(text="hi"),
+            make_happy_path_stream(text="extra"),
+        ],
+        max_cost_usd=0.50,
+    )
+
+    chunks = await _consume(
+        adapter, options=AdapterOptions(max_cost_usd=0.0)
+    )
+
+    cost_errors = [
+        c
+        for c in chunks
+        if isinstance(c, StreamError) and c.code == "cost_cap_exceeded"
+    ]
+    assert len(cost_errors) == 1, (
+        "max_cost_usd=0.0 must be honored (cost cap trips), not replaced "
+        "by the adapter default (DEBT-02 falsy-0 bug)"
+    )

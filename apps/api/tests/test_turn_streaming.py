@@ -1102,3 +1102,302 @@ async def test_missing_anthropic_key_returns_400_not_500(
         f"error detail should name the missing env var so the user "
         f"knows what to set; got {detail!r}"
     )
+
+
+# =====================================================================
+# Phase 9 Wave-0 RED test slices — RELI-01 (retry) + RELI-02 (kill-switch)
+# =====================================================================
+#
+# These four tests are scaffolded RED for Phase 9 (VALIDATION.md
+# Per-Requirement map rows RELI-01/RELI-02). They assert the TARGET
+# behavior the engineering waves (Plans 02-03) will land, and are each
+# gated with an imperative ``pytest.xfail(...)`` so they:
+#   - are COLLECTABLE by their VALIDATION.md ``-k`` selector
+#     (retry / first_token_no_retry / wall_clock / budget_exceeded), and
+#   - report ``xfail`` (NOT error, NOT pass) against today's unmodified
+#     turn handler.
+# When the retry loop / kill-switch lands, the owning plan removes the
+# ``pytest.xfail(...)`` guard line and the assertions below run for real
+# (Phase-1 D named-body RED convention; NOT module-level skip).
+
+
+async def test_retry_retriable_establishment_error(
+    monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    """RELI-01 (-k retry): a retriable establishment error retries
+    (≤3, full-jitter) then succeeds; the turn streams a normal Done.
+
+    Target behavior (Plan 02-03): when the adapter's FIRST round-trip
+    raises a retriable error (e.g. provider_unavailable) BEFORE any
+    chunk is yielded, the turn handler retries with full-jitter backoff
+    up to 3 attempts. A raise-then-succeed fake therefore still produces
+    a text_delta + done stream. ``max_retries=0`` is forced for the
+    non-retriable path (covered by the sibling slice).
+    """
+
+    pytest.xfail("Wave 0 RED — RELI-01 retry loop not yet wired (Plan 02-03)")
+
+    app = _fresh_app(monkeypatch, tmp_path)
+
+    from apps.api.backends.chunks import Done, StreamError, TextDelta
+    from apps.api.tests.fake_adapter import FakeStreamingAdapter
+
+    # Raise a retriable establishment error on attempt 1, succeed on 2.
+    fake = FakeStreamingAdapter(
+        [
+            StreamError(
+                code="provider_unavailable", message="503", retriable=True
+            ),
+            TextDelta(text="recovered"),
+            Done(tokens_in=1, tokens_out=1, cost_usd=0.001, latency_ms=10),
+        ]
+    )
+    app.state.adapters = {"openrouter": fake}
+
+    from src.routing.schema import RoutingDecision
+
+    def fake_decide(*args, **kwargs):
+        return RoutingDecision(
+            backend="openrouter",
+            model_or_agent="openai/gpt-5",
+            rationale="test",
+            confidence=0.9,
+            signals={},
+        )
+
+    monkeypatch.setattr("apps.api.routes.turn.decide", fake_decide)
+
+    async with app.router.lifespan_context(app):
+        async with httpx.AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test"
+        ) as client:
+            thread_id = await _create_thread(client)
+            events: list[str] = []
+            async with client.stream(
+                "POST",
+                f"/api/v1/threads/{thread_id}/turn",
+                json={"message": "hi"},
+            ) as resp:
+                async for line in resp.aiter_lines():
+                    if line.startswith("event:"):
+                        events.append(line.split(":", 1)[1].strip())
+                        if events[-1] == "done":
+                            break
+
+    # After a successful retry the recovered text_delta reaches the wire
+    # and the stream terminates normally (no surfaced stream_error).
+    assert "text_delta" in events
+    assert events[-1] == "done"
+
+
+async def test_first_token_no_retry(
+    monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    """RELI-01 (D-01 boundary): NO retry after the first chunk streamed.
+
+    Target behavior: once any chunk has reached the consumer, a
+    subsequent mid-stream error is NOT retried (retrying would replay
+    already-streamed tokens). The handler surfaces the error and a
+    terminal Done; it does NOT re-invoke the adapter.
+    """
+
+    pytest.xfail(
+        "Wave 0 RED — RELI-01 first-token no-retry boundary not yet wired "
+        "(Plan 02-03)"
+    )
+
+    app = _fresh_app(monkeypatch, tmp_path)
+
+    from apps.api.backends.chunks import Done, StreamError, TextDelta
+    from apps.api.tests.fake_adapter import FakeStreamingAdapter
+
+    # A chunk streams FIRST, then a retriable error: must NOT retry.
+    fake = FakeStreamingAdapter(
+        [
+            TextDelta(text="partial"),
+            StreamError(
+                code="provider_unavailable", message="503", retriable=True
+            ),
+            Done(),
+        ]
+    )
+    app.state.adapters = {"openrouter": fake}
+
+    from src.routing.schema import RoutingDecision
+
+    def fake_decide(*args, **kwargs):
+        return RoutingDecision(
+            backend="openrouter",
+            model_or_agent="openai/gpt-5",
+            rationale="test",
+            confidence=0.9,
+            signals={},
+        )
+
+    monkeypatch.setattr("apps.api.routes.turn.decide", fake_decide)
+
+    async with app.router.lifespan_context(app):
+        async with httpx.AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test"
+        ) as client:
+            thread_id = await _create_thread(client)
+            text_delta_count = 0
+            async with client.stream(
+                "POST",
+                f"/api/v1/threads/{thread_id}/turn",
+                json={"message": "hi"},
+            ) as resp:
+                async for line in resp.aiter_lines():
+                    if line.startswith("event: text_delta"):
+                        text_delta_count += 1
+                    if line.startswith("event: done"):
+                        break
+
+    # Exactly ONE text_delta — a retry would have replayed the partial.
+    assert text_delta_count == 1, (
+        "first-token boundary: no retry may replay already-streamed tokens"
+    )
+
+
+@pytest.mark.timeout(10)
+async def test_wall_clock_exceeded_emitted(
+    monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    """RELI-02: a wall-clock deadline trip emits StreamError(wall_clock_exceeded)
+    + Done, distinct from ``timeout``.
+
+    Target behavior: the turn handler enforces a per-turn wall-clock
+    deadline. When a stream runs past it, the handler emits a
+    ``wall_clock_exceeded`` StreamError (one of the two D-05 codes added
+    in Plan 01) followed by the terminal Done. The code is DISTINCT from
+    the provider-level ``timeout`` code.
+    """
+
+    pytest.xfail(
+        "Wave 0 RED — RELI-02 wall-clock kill-switch not yet wired "
+        "(Plan 02-03)"
+    )
+
+    app = _fresh_app(monkeypatch, tmp_path)
+
+    from apps.api.backends.chunks import Done, TextDelta
+    from apps.api.tests.fake_adapter import FakeStreamingAdapter
+
+    # A stream that stalls past the (to-be-added) per-turn deadline.
+    fake = FakeStreamingAdapter(
+        [TextDelta(text="slow"), Done()], sleep_per_chunk=30.0
+    )
+    app.state.adapters = {"openrouter": fake}
+
+    from src.routing.schema import RoutingDecision
+
+    def fake_decide(*args, **kwargs):
+        return RoutingDecision(
+            backend="openrouter",
+            model_or_agent="openai/gpt-5",
+            rationale="test",
+            confidence=0.9,
+            signals={},
+        )
+
+    monkeypatch.setattr("apps.api.routes.turn.decide", fake_decide)
+
+    codes: list[str] = []
+    async with app.router.lifespan_context(app):
+        async with httpx.AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test"
+        ) as client:
+            thread_id = await _create_thread(client)
+            async with client.stream(
+                "POST",
+                f"/api/v1/threads/{thread_id}/turn",
+                json={"message": "hi"},
+            ) as resp:
+                current = None
+                async for line in resp.aiter_lines():
+                    if line.startswith("event:"):
+                        current = line.split(":", 1)[1].strip()
+                    elif line.startswith("data:") and current == "stream_error":
+                        codes.append(json.loads(line.split(":", 1)[1])["code"])
+                    if line.startswith("event: done"):
+                        break
+
+    assert "wall_clock_exceeded" in codes, (
+        "a stalled turn must surface wall_clock_exceeded (distinct from timeout)"
+    )
+    assert "timeout" not in codes, "wall-clock trip is NOT the provider timeout code"
+
+
+async def test_budget_exceeded_distinct_from_cost_cap(
+    monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    """RELI-02: a USD over-cap kill-switch trip emits
+    StreamError(budget_exceeded), distinct from ``cost_cap_exceeded``.
+
+    Target behavior: the turn handler enforces a per-turn USD backstop
+    independent of the adapter's own ``cost_cap_exceeded`` accounting.
+    When cumulative spend crosses the backstop, the handler emits the
+    ``budget_exceeded`` D-05 code (added in Plan 01) — a SEPARATE code
+    from the adapter-level ``cost_cap_exceeded`` so the UI and the retry
+    policy can distinguish the turn-level kill-switch from a single
+    adapter's cap.
+    """
+
+    pytest.xfail(
+        "Wave 0 RED — RELI-02 budget kill-switch not yet wired (Plan 02-03)"
+    )
+
+    app = _fresh_app(monkeypatch, tmp_path)
+
+    from apps.api.backends.chunks import Done, TextDelta
+    from apps.api.tests.fake_adapter import FakeStreamingAdapter
+
+    # A Done reporting spend that crosses the turn-level backstop.
+    fake = FakeStreamingAdapter(
+        [
+            TextDelta(text="expensive"),
+            Done(tokens_in=1_000_000, tokens_out=1_000_000, cost_usd=999.0),
+        ]
+    )
+    app.state.adapters = {"openrouter": fake}
+
+    from src.routing.schema import RoutingDecision
+
+    def fake_decide(*args, **kwargs):
+        return RoutingDecision(
+            backend="openrouter",
+            model_or_agent="openai/gpt-5",
+            rationale="test",
+            confidence=0.9,
+            signals={},
+        )
+
+    monkeypatch.setattr("apps.api.routes.turn.decide", fake_decide)
+
+    codes: list[str] = []
+    async with app.router.lifespan_context(app):
+        async with httpx.AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test"
+        ) as client:
+            thread_id = await _create_thread(client)
+            async with client.stream(
+                "POST",
+                f"/api/v1/threads/{thread_id}/turn",
+                json={"message": "hi"},
+            ) as resp:
+                current = None
+                async for line in resp.aiter_lines():
+                    if line.startswith("event:"):
+                        current = line.split(":", 1)[1].strip()
+                    elif line.startswith("data:") and current == "stream_error":
+                        codes.append(json.loads(line.split(":", 1)[1])["code"])
+                    if line.startswith("event: done"):
+                        break
+
+    assert "budget_exceeded" in codes, (
+        "turn-level USD backstop must surface budget_exceeded"
+    )
+    assert "cost_cap_exceeded" not in codes, (
+        "budget_exceeded is the turn kill-switch, distinct from the "
+        "adapter-level cost_cap_exceeded"
+    )
