@@ -8,7 +8,7 @@
 //
 // Cross-refs:
 //   - apps/api/backends/chunks.py (Pydantic source of truth — 7 chunk variants
-//     + the 9-value StreamError.code enum on lines 127-137)
+//     + the 11-value StreamError.code enum, kept byte-for-byte in lockstep)
 //   - src/routing/schema.py (RoutingDecision shape mirrored by
 //     RoutingDecisionDataSchema)
 //   - 04-CONTEXT.md D-15 (structured 5-key routing_decision payload)
@@ -93,9 +93,11 @@ export const ScreenshotSchema = z.object({
   image_format: z.enum(["png", "jpeg"]),
 });
 
-// StreamError.code closed vocabulary — 9 values from
-// `apps/api/backends/chunks.py:127-137`. Order preserved to ease byte-for-byte
-// comparison with the Python source.
+// StreamError.code closed vocabulary — 11 values from
+// `apps/api/backends/chunks.py` StreamError.code. Order preserved to ease
+// byte-for-byte comparison with the Python source. The last two entries
+// were added additively in Phase 9 (D-05); keep this list in lockstep with
+// the Python Literal (same order).
 export const StreamErrorCodeSchema = z.enum([
   "cost_cap_exceeded",
   "step_cap_exceeded",
@@ -106,6 +108,8 @@ export const StreamErrorCodeSchema = z.enum([
   "timeout",
   "validation_error",
   "internal_error",
+  "wall_clock_exceeded",
+  "budget_exceeded",
 ]);
 export type StreamErrorCodeT = z.infer<typeof StreamErrorCodeSchema>;
 
@@ -117,9 +121,12 @@ export const StreamErrorSchema = z.object({
   retriable: z.boolean(),
 });
 
-// Done — `apps/api/backends/chunks.py:142-157`. EVERY field is nullable AND
+// Done — `apps/api/backends/chunks.py` Done model. EVERY field is nullable AND
 // optional because the Python defaults are `int | None = None`. The auth-
 // failure path lands Done with no usage info; the translator must accept it.
+// `assistant_message_id` (Phase 9, DEBT-04) mirrors the optional Python
+// `assistant_message_id: str | None = None` — the server-assigned id used as
+// the feedback join key for a live turn. `.nullish()` == `.nullable().optional()`.
 export const DoneSchema = z.object({
   type: z.literal("done"),
   tokens_in: z.number().nullable().optional(),
@@ -127,6 +134,7 @@ export const DoneSchema = z.object({
   cost_usd: z.number().nullable().optional(),
   latency_ms: z.number().nullable().optional(),
   routing_signals: z.record(z.string(), z.unknown()).nullable().optional(),
+  assistant_message_id: z.string().nullish(),
 });
 
 // --------------------------------------------------------------------
