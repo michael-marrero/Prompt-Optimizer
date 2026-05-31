@@ -22,7 +22,13 @@
 //   - keys render masked only (never the plaintext key)
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, fireEvent, within } from "@testing-library/react";
+import {
+  render,
+  screen,
+  fireEvent,
+  within,
+  waitFor,
+} from "@testing-library/react";
 import SettingsPage from "@/app/settings/page";
 
 // Phase 9 (DEBT-05) extension mocks sonner so the WR-06 revert slice can
@@ -54,6 +60,13 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  // DEBT-05: the allowlist persists to localStorage (remount read-back). Clear
+  // it between cases so the persist case cannot bleed into the revert case.
+  try {
+    localStorage.clear();
+  } catch {
+    /* no localStorage in this env */
+  }
 });
 
 describe("UI-12 component — SettingsPage (UI-SPEC §11)", () => {
@@ -116,22 +129,26 @@ describe("UI-12 component — SettingsPage (UI-SPEC §11)", () => {
 //   - WR-06: a fire-and-forget settings PATCH that does not surface a
 //     failure — a failed PATCH must toast + REVERT the optimistic value.
 //
-// Both slices use `it.fails(...)` so they are COLLECTABLE and report
-// failing (RED) against today's settings surface (the persisted per-model
-// allowlist control does not exist yet, and the IN-02 toggle is a no-op).
-// The owning plan removes the `.fails` marker when the behavior lands.
+// History: both slices shipped as `it.fails(...)` RED slices in Plan 01
+// (collectable + reporting RED against the baseline settings surface, where
+// the persisted per-model allowlist did not exist and the toggle was a no-op).
+// Plan 04 landed the persisted allowlist + toast/revert and removed the
+// `.fails` markers (green assertions now).
 
-describe("DEBT-05 — settings allowlist persistence + PATCH-failure revert (RED)", () => {
-  it.fails(
+describe("DEBT-05 — settings allowlist persistence + PATCH-failure revert", () => {
+  it(
     "DEBT-05 IN-02: a per-model allowlist toggle survives a remount (persisted, not local-only)",
     async () => {
       const { unmount } = render(<SettingsPage />);
 
-      // The per-model allowlist toggle (Routing Preferences, IN-02). Today
-      // this control is absent / no-op, so the query throws → RED.
-      const toggle = await screen.findByRole("switch", {
-        name: /allow .* for routing/i,
-      });
+      // The per-model allowlist toggles (Routing Preferences, IN-02). Target
+      // the FIRST allowlist switch (there is one per routable model); Plan 04
+      // made this control persisted, so the toggled value survives a remount.
+      const toggle = (
+        await screen.findAllByRole("switch", {
+          name: /allow .* for routing/i,
+        })
+      )[0];
       // Capture its initial pressed state, flip it, and remount.
       const before = toggle.getAttribute("aria-checked");
       fireEvent.click(toggle);
@@ -139,16 +156,19 @@ describe("DEBT-05 — settings allowlist persistence + PATCH-failure revert (RED
       unmount();
       render(<SettingsPage />);
 
-      const reloaded = await screen.findByRole("switch", {
-        name: /allow .* for routing/i,
-      });
+      const reloaded = (
+        await screen.findAllByRole("switch", {
+          name: /allow .* for routing/i,
+        })
+      )[0];
       // Target: the flipped value PERSISTED across the remount (it was
-      // written to the server, not just held in local component state).
+      // written through to the server AND mirrored client-side, not just held
+      // in transient local component state).
       expect(reloaded.getAttribute("aria-checked")).not.toBe(before);
     },
   );
 
-  it.fails(
+  it(
     "DEBT-05 WR-06: a failed allowlist PATCH surfaces a toast AND reverts the optimistic value",
     async () => {
       // GET succeeds (initial load), the PATCH rejects (server 500).
@@ -178,23 +198,23 @@ describe("DEBT-05 — settings allowlist persistence + PATCH-failure revert (RED
 
       render(<SettingsPage />);
 
-      const toggle = await screen.findByRole("switch", {
-        name: /allow .* for routing/i,
-      });
+      const toggle = (
+        await screen.findAllByRole("switch", {
+          name: /allow .* for routing/i,
+        })
+      )[0];
       const before = toggle.getAttribute("aria-checked");
       fireEvent.click(toggle);
 
-      // Let the rejected PATCH settle.
-      await Promise.resolve();
-      await Promise.resolve();
-
-      // Target: a failure toast fired …
-      expect(toast.error).toHaveBeenCalled();
+      // Target: the rejected PATCH surfaces a failure toast …
+      await waitFor(() => expect(toast.error).toHaveBeenCalled());
       // … and the optimistic value REVERTED to its pre-click state.
-      const reverted = await screen.findByRole("switch", {
-        name: /allow .* for routing/i,
+      await waitFor(() => {
+        const reverted = screen.getAllByRole("switch", {
+          name: /allow .* for routing/i,
+        })[0];
+        expect(reverted.getAttribute("aria-checked")).toBe(before);
       });
-      expect(reverted.getAttribute("aria-checked")).toBe(before);
     },
   );
 });

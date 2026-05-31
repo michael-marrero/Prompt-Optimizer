@@ -7,8 +7,9 @@
 // section so BYOK key entry + computer-use opt-in live in the same place:
 //   1. OPTIMIZE FOR — Priority segmented (toggle-group) · Show routing badge ·
 //      Cost-aware fallback.
-//   2. Allowed models · N of N — per-model toggles (display; the active routing
-//      allowlist is per-backend, Phase 5 D-05, via the Backends section).
+//   2. Allowed models · N of N — per-model toggles. DEBT-05 IN-02 (Phase 9):
+//      these now PERSIST via the provider (no longer reset on remount) and PATCH
+//      the server; the per-backend active allowlist (Phase 5 D-05) is unchanged.
 //   3. Privacy — Zero data retention.
 //   + Keys & Backends — re-skinned KeyForm (openrouter + anthropic) + the
 //     computer-use opt-in note.
@@ -84,14 +85,15 @@ export function RoutingPrefsModal(): React.JSX.Element {
     setCostAwareFallback,
     zeroDataRetention,
     setZeroDataRetention,
+    modelAllowlist,
+    setModelAllowed,
   } = useRoutingPrefs();
 
-  // Per-model allowlist is display-only this phase (the active allowlist is
-  // per-backend, D-05). Default all on; "N of N".
-  const [allowed, setAllowed] = React.useState<Record<string, boolean>>(() =>
-    Object.fromEntries(ROUTABLE.map((m) => [m.slug, true])),
-  );
-  const allowedCount = Object.values(allowed).filter(Boolean).length;
+  // DEBT-05 IN-02 — the per-model allowlist is now PERSISTED via the provider
+  // (no longer pure local useState that reset on remount). An absent slug means
+  // allowed (the default-all-on baseline); "N of N" counts only allowed slugs.
+  const isAllowed = (slug: string): boolean => modelAllowlist[slug] ?? true;
+  const allowedCount = ROUTABLE.filter((m) => isAllowed(m.slug)).length;
 
   return (
     <Dialog open={open} onOpenChange={(o) => (o ? undefined : closeRoutingPrefs())}>
@@ -160,11 +162,9 @@ export function RoutingPrefsModal(): React.JSX.Element {
             {ROUTABLE.map((m) => (
               <Row key={m.slug} name={m.label} desc="OpenRouter">
                 <Switch
-                  checked={allowed[m.slug] ?? true}
-                  onCheckedChange={(v) =>
-                    setAllowed((prev) => ({ ...prev, [m.slug]: v }))
-                  }
-                  aria-label={`Allow ${m.label}`}
+                  checked={isAllowed(m.slug)}
+                  onCheckedChange={(v) => setModelAllowed(m.slug, v)}
+                  aria-label={`Allow ${m.label} for routing`}
                 />
               </Row>
             ))}
