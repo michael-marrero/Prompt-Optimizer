@@ -5,10 +5,11 @@
 // maps Phase 2 StreamError chunks to AI SDK v6 {type:"error", code, retriable}
 // chunks).
 //
-// Catalog: the code → friendly-message map covers all 9 D-06 codes from
-// apps/api/backends/chunks.py lines 127-137 (cost_cap_exceeded,
+// Catalog: the code → friendly-message map covers all 11 D-06/D-05 codes
+// from apps/api/backends/chunks.py StreamError.code (cost_cap_exceeded,
 // step_cap_exceeded, cancelled, rate_limited, auth_failed,
-// provider_unavailable, timeout, validation_error, internal_error).
+// provider_unavailable, timeout, validation_error, internal_error, plus the
+// two Phase 9 D-05 kill-switch codes — see the last two map entries below).
 // Unknown codes (defense-in-depth — Zod schema should already reject)
 // fall back to a generic "Something went wrong" message.
 //
@@ -27,8 +28,9 @@
 import { AlertCircle } from "lucide-react";
 
 // UI-SPEC §12.2 — code → human-readable copy. Update this map together with
-// apps/api/backends/chunks.py when adding new codes. The 9 baseline codes
-// are the Phase-2 D-06 closed vocabulary.
+// apps/api/backends/chunks.py when adding new codes. The 11 baseline codes
+// are the Phase-2 D-06 closed vocabulary plus the two Phase-9 D-05 kill-switch
+// codes (the last two map entries — Plan 02 server reasons).
 const FRIENDLY_MESSAGES: Record<string, string> = {
   cost_cap_exceeded:
     "Cost cap of $0.50 reached. Try a shorter prompt or raise the cap in settings.",
@@ -46,15 +48,23 @@ const FRIENDLY_MESSAGES: Record<string, string> = {
     "That request couldn't be sent. Check your input and try again.",
   internal_error:
     "Something went wrong inside Prompt-Optimizer. Check the API logs and retry.",
+  // Phase 9 D-05 kill-switch codes — the turn was stopped by a hard limit
+  // (Plan 02 turn.py). Both are non-retriable: retrying hits the same limit.
+  wall_clock_exceeded:
+    "Stopped — this turn hit its time limit.",
+  budget_exceeded:
+    "Stopped — this turn reached its budget limit.",
 };
 
 export interface StreamErrorBannerProps {
   /** The closed-vocab D-06 error code. */
   code: string;
-  /** The upstream error message. Currently not surfaced in the banner
-   *  body (the friendly text wins for the user-facing copy) but kept on
-   *  the props interface so Plan 06 can opt into "show technical details"
-   *  if requested. */
+  /** The upstream error message, ALREADY redacted server-side by SECURE-07
+   *  (Plans 02/03 route it through logging_filter._redact_text before it
+   *  reaches the SSE chunk). When truthy it is surfaced verbatim inside a
+   *  collapsible "Details" disclosure (Phase 9 D-07 opt-in) for power users;
+   *  the friendly text still wins as the primary user-facing copy. The banner
+   *  renders it as-is and does NOT reconstruct unredacted text (T-09-02). */
   message: string;
   /** Whether retry is offered. Only retriable codes show "Try again". */
   retriable: boolean;
@@ -65,6 +75,7 @@ export interface StreamErrorBannerProps {
 
 export function StreamErrorBanner({
   code,
+  message,
   retriable,
   onRetry,
 }: StreamErrorBannerProps): React.JSX.Element {
@@ -89,6 +100,17 @@ export function StreamErrorBanner({
           >
             Try again
           </button>
+        )}
+        {/* D-07 opt-in: a collapsible disclosure surfacing the (already
+            server-redacted — T-09-02) technical message for power users.
+            Rendered ONLY when a message is present. */}
+        {message && (
+          <details className="mt-2 text-xs">
+            <summary className="cursor-pointer select-none">Details</summary>
+            <code className="mt-1 block whitespace-pre-wrap break-words font-mono">
+              {message}
+            </code>
+          </details>
         )}
       </div>
     </div>

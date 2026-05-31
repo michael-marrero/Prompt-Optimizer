@@ -6,18 +6,17 @@
 // Three cases:
 //   1. (GREEN today) renders friendly text + (code) + a "Try again"
 //      affordance for a retriable code — the Phase 4/5 baseline contract.
-//   2. (RED) renders the two new D-05 codes (wall_clock_exceeded,
-//      budget_exceeded) with FRIENDLY copy — fails until Plan 04 adds them
-//      to FRIENDLY_MESSAGES (today they fall back to the generic message).
-//   3. (RED) exposes a collapsible "Details" disclosure showing the
-//      (already-redacted) `message` prop — fails until Plan 04 adds the
-//      <details> element (today the `message` prop is accepted but never
-//      rendered).
+//   2. (GREEN — Plan 04) renders the two new D-05 codes (wall_clock_exceeded,
+//      budget_exceeded) with FRIENDLY copy — Plan 04 added them to
+//      FRIENDLY_MESSAGES (no longer the generic fallback).
+//   3. (GREEN — Plan 04 / D-07) exposes a collapsible "Details" disclosure
+//      showing the (already-redacted) `message` prop — Plan 04 added the
+//      <details> element gated on the message prop.
 //
-// RED convention: cases 2 + 3 use `it.fails(...)` so they are COLLECTABLE
-// and report failing (RED) against today's component; the owning plan
-// removes the `.fails` marker when the behavior lands (at which point an
-// unexpected pass flips `it.fails` red, signaling the flip).
+// History: cases 2 + 3 shipped as `it.fails(...)` RED slices in Plan 01 so
+// they were COLLECTABLE and reported failing against the Phase 4/5 baseline;
+// Plan 04 landed the behavior and removed the `.fails` marker (a green
+// assertion now).
 //
 // Cross-refs:
 //   - apps/web/components/StreamErrorBanner.tsx (FRIENDLY_MESSAGES + message prop)
@@ -49,8 +48,8 @@ describe("RELI-04 — StreamErrorBanner", () => {
     ).toBeInTheDocument();
   });
 
-  it.fails(
-    "renders FRIENDLY copy for the two new D-05 codes (RED until Plan 04)",
+  it(
+    "renders FRIENDLY copy for the two new D-05 codes (GREEN — Plan 04)",
     () => {
       const { rerender } = render(
         <StreamErrorBanner
@@ -82,8 +81,8 @@ describe("RELI-04 — StreamErrorBanner", () => {
     },
   );
 
-  it.fails(
-    "exposes a collapsible Details disclosure showing the message prop (RED until Plan 04 / D-07)",
+  it(
+    "exposes a collapsible Details disclosure showing the message prop (GREEN — Plan 04 / D-07)",
     () => {
       const technical = "RequestId 0xDEADBEEF — upstream 503 after 2 retries";
       render(
