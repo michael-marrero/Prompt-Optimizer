@@ -727,8 +727,6 @@ async def test_wait_clamp_duration_ceiling(fake_screen):
     arbitrary time.
     """
 
-    pytest.xfail("Wave 0 RED — DEBT-01 wait-duration clamp not yet wired")
-
     # A tool-use stream issuing a wait with an absurd duration.
     adapter, _client = _build_adapter(
         fake_screen=fake_screen,
@@ -760,8 +758,6 @@ async def test_navigation_url_scheme_rejected(fake_screen):
     navigation surfaces a ``validation_error`` StreamError and never
     calls ``screen.goto`` with the dangerous URL.
     """
-
-    pytest.xfail("Wave 0 RED — DEBT-03 URL-scheme allowlist not yet wired")
 
     adapter, _client = _build_adapter(
         fake_screen=fake_screen,

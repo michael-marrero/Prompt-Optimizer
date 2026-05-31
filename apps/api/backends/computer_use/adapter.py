@@ -96,12 +96,17 @@ from apps.api.backends.chunks import (
     ToolResult,
 )
 from apps.api.backends.computer_use.cost import ComputerUseCostTracker
-from apps.api.backends.computer_use.screen import PlaywrightScreen
+from apps.api.backends.computer_use.screen import (
+    NavigationSchemeError,
+    PlaywrightScreen,
+    _validate_navigation_url,
+)
 from apps.api.backends.computer_use.step_counter import (
     DEFAULT_STEP_CAP,
     StepCounter,
 )
 from apps.api.backends.cost import DEFAULT_PER_TURN_COST_USD
+from apps.api.backends.logging_filter import _redact_text
 from apps.api.backends.pricing import PricingTable
 from apps.api.backends.protocol import AdapterOptions, Message
 
@@ -117,6 +122,12 @@ DEFAULT_MODEL: Final[str] = "claude-opus-4-7"
 # CONTEXT specifics line 262 — D-13 locks 1280×800. At this resolution
 # the computer_20251124 tool is 1:1 pixel-to-coordinate (no scaling).
 DEFAULT_VIEWPORT: Final[tuple[int, int]] = (1280, 800)
+# DEBT-01 (WR-01): ceiling on the agent-supplied ``wait`` duration. The
+# model can request any sleep; without a clamp a confused/adversarial
+# model stalls the whole turn (the per-turn wall-clock is ~600s). 30s is
+# generous for a "let the page settle" wait while keeping a single action
+# from monopolising the budget.
+MAX_WAIT_S: Final[float] = 30.0
 
 
 # Resolve config/pricing.json once at import time.
@@ -454,14 +465,26 @@ class ComputerUseAdapter:
                 tool_results: list[dict[str, Any]] = []
                 for tu in tool_uses_this_step:
                     action = tu["input"].get("action")
-                    (
-                        result_content,
-                        is_error,
-                    ) = await self._execute_action(
-                        screen,
-                        action,
-                        tu["input"],
-                    )
+                    try:
+                        (
+                            result_content,
+                            is_error,
+                        ) = await self._execute_action(
+                            screen,
+                            action,
+                            tu["input"],
+                        )
+                    except NavigationSchemeError as exc:
+                        # DEBT-03: a disallowed URL scheme never reaches
+                        # screen.goto. Emit a validation_error StreamError,
+                        # surface it back to the model as a tool error, and
+                        # let the loop continue so the agent can recover.
+                        yield StreamError(
+                            code="validation_error",
+                            message=_redact_text(str(exc)),
+                            retriable=False,
+                        )
+                        result_content, is_error = str(exc), True
 
                     # ToolResult chunk (action narration).
                     yield ToolResult(
@@ -642,12 +665,28 @@ class ComputerUseAdapter:
                 )
             if action == "navigate":
                 url = params.get("url", "") or ""
+                # DEBT-03: reject non-http/https BEFORE goto. Validate here
+                # too (the screen.goto chokepoint also validates) so the
+                # NavigationSchemeError propagates as a validation_error
+                # StreamError rather than a generic tool error.
+                _validate_navigation_url(url)
                 await screen.goto(url)
                 return (f"Navigated to {url}.", False)
             if action == "wait":
-                duration = float(params.get("duration", 1.0) or 1.0)
-                await asyncio.sleep(duration)
+                # DEBT-01: clamp the agent-supplied duration to a ceiling
+                # so a large value cannot stall the turn. The narration
+                # reflects the CLAMPED value, not the requested one.
+                duration = min(
+                    float(params.get("duration", 1.0) or 1.0),
+                    MAX_WAIT_S,
+                )
+                await screen.wait(duration)
                 return (f"Waited {duration}s.", False)
             return (f"Unsupported action: {action}", True)
+        except NavigationSchemeError:
+            # DEBT-03: surface as a validation_error StreamError (not a
+            # tool error). Re-raise so the dispatch loop emits the chunk
+            # and skips the rest of this action.
+            raise
         except Exception as exc:  # noqa: BLE001 — surface as tool error.
             return (f"Error executing {action}: {exc}", True)
