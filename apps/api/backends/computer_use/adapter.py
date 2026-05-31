@@ -328,14 +328,14 @@ class ComputerUseAdapter:
                 if steps.exceeded():
                     yield StreamError(
                         code="step_cap_exceeded",
-                        message=f"Step cap of {steps.cap} reached.",
+                        message=_redact_text(f"Step cap of {steps.cap} reached."),
                         retriable=False,
                     )
                     break
                 if tracker.over_cap():
                     yield StreamError(
                         code="cost_cap_exceeded",
-                        message=(
+                        message=_redact_text(
                             f"Cost cap ${tracker.max_cost_usd:.6f} exceeded "
                             f"(used ${tracker.total():.6f})."
                         ),
@@ -442,7 +442,7 @@ class ComputerUseAdapter:
                 if steps.exceeded():
                     yield StreamError(
                         code="step_cap_exceeded",
-                        message=f"Step cap of {steps.cap} reached.",
+                        message=_redact_text(f"Step cap of {steps.cap} reached."),
                         retriable=False,
                     )
                     break
@@ -450,7 +450,7 @@ class ComputerUseAdapter:
                 if tracker.over_cap():
                     yield StreamError(
                         code="cost_cap_exceeded",
-                        message=(
+                        message=_redact_text(
                             f"Cost cap ${tracker.max_cost_usd:.6f} exceeded "
                             f"(used ${tracker.total():.6f})."
                         ),
@@ -552,7 +552,7 @@ class ComputerUseAdapter:
             # so the caller's task is marked cancelled.
             yield StreamError(
                 code="cancelled",
-                message="Stream cancelled by caller.",
+                message=_redact_text("Stream cancelled by caller."),
                 retriable=True,
             )
             yield Done(
@@ -569,7 +569,7 @@ class ComputerUseAdapter:
         except AuthenticationError as exc:
             yield StreamError(
                 code="auth_failed",
-                message=str(exc),
+                message=_redact_text(str(exc)),
                 retriable=False,
             )
             yield Done(routing_signals=options.routing_signals)
@@ -577,7 +577,7 @@ class ComputerUseAdapter:
         except APITimeoutError as exc:
             yield StreamError(
                 code="timeout",
-                message=str(exc),
+                message=_redact_text(str(exc)),
                 retriable=True,
             )
             yield Done(routing_signals=options.routing_signals)
@@ -587,7 +587,7 @@ class ComputerUseAdapter:
             code = "rate_limited" if status_code == 429 else "provider_unavailable"
             yield StreamError(
                 code=code,
-                message=str(exc),
+                message=_redact_text(str(exc)),
                 retriable=(code == "rate_limited"),
             )
             yield Done(routing_signals=options.routing_signals)
@@ -596,7 +596,7 @@ class ComputerUseAdapter:
             logger.exception("Computer-use adapter internal error")
             yield StreamError(
                 code="internal_error",
-                message=f"{type(exc).__name__}: {exc}",
+                message=_redact_text(f"{type(exc).__name__}: {exc}"),
                 retriable=False,
             )
             yield Done(routing_signals=options.routing_signals)

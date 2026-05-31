@@ -24,8 +24,6 @@ from __future__ import annotations
 
 import json
 
-import pytest
-
 from apps.api.backends.chunks import StreamError
 from apps.api.backends.logging_filter import _redact_text
 
@@ -60,11 +58,6 @@ async def test_sk_key_in_exception_redacted_in_stream_error() -> None:
     serialized ``stream_error`` chunk JSON contains the redaction marker,
     not the key.
     """
-
-    pytest.xfail(
-        "Wave 0 RED — SECURE-07 StreamError redaction not yet wired at the "
-        "adapter error-mapping sites (CR-03)"
-    )
 
     # A provider exception that leaks the key in its string form.
     exc = RuntimeError(f"auth rejected for {LEAKED_KEY}")

@@ -104,6 +104,7 @@ from apps.api.backends.claude_code.step_counter import (
     StepCounter,
 )
 from apps.api.backends.cost import DEFAULT_PER_TURN_COST_USD
+from apps.api.backends.logging_filter import _redact_text
 from apps.api.backends.pricing import PricingTable
 from apps.api.backends.protocol import AdapterOptions, Message
 
@@ -435,7 +436,7 @@ class ClaudeCodeAdapter:
                 if steps.exceeded():
                     yield StreamError(
                         code="step_cap_exceeded",
-                        message=f"Step cap of {steps.cap} reached.",
+                        message=_redact_text(f"Step cap of {steps.cap} reached."),
                         retriable=False,
                     )
                     # Pitfall 5: interrupt BEFORE break so the SDK
@@ -449,7 +450,7 @@ class ClaudeCodeAdapter:
                 if tracker.over_cap():
                     yield StreamError(
                         code="cost_cap_exceeded",
-                        message=(
+                        message=_redact_text(
                             f"Cost cap ${tracker.max_cost_usd:.6f} exceeded "
                             f"(used ${tracker.total():.6f})."
                         ),
@@ -482,7 +483,7 @@ class ClaudeCodeAdapter:
                     pass
             yield StreamError(
                 code="cancelled",
-                message="Stream cancelled by caller.",
+                message=_redact_text("Stream cancelled by caller."),
                 retriable=True,
             )
             yield Done(
@@ -497,7 +498,7 @@ class ClaudeCodeAdapter:
         except ProcessError as exc:
             yield StreamError(
                 code="provider_unavailable",
-                message=str(exc),
+                message=_redact_text(str(exc)),
                 retriable=False,
             )
             yield Done(routing_signals=options.routing_signals)
@@ -505,7 +506,7 @@ class ClaudeCodeAdapter:
         except ClaudeSDKError as exc:
             yield StreamError(
                 code="internal_error",
-                message=str(exc),
+                message=_redact_text(str(exc)),
                 retriable=False,
             )
             yield Done(routing_signals=options.routing_signals)
@@ -514,7 +515,7 @@ class ClaudeCodeAdapter:
             logger.exception("Claude Code adapter internal error")
             yield StreamError(
                 code="internal_error",
-                message=f"{type(exc).__name__}: {exc}",
+                message=_redact_text(f"{type(exc).__name__}: {exc}"),
                 retriable=False,
             )
             yield Done(routing_signals=options.routing_signals)

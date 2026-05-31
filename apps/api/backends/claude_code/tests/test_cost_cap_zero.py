@@ -18,8 +18,6 @@
 
 from __future__ import annotations
 
-import pytest
-
 from apps.api.backends.chunks import Done, StreamError
 from apps.api.backends.claude_code.adapter import ClaudeCodeAdapter
 from apps.api.backends.protocol import AdapterOptions

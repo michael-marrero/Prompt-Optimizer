@@ -18,8 +18,6 @@
 
 from __future__ import annotations
 
-import pytest
-
 from apps.api.backends.chunks import Done, StreamError
 from apps.api.backends.openrouter.adapter import OpenRouterAdapter
 from apps.api.backends.protocol import AdapterOptions

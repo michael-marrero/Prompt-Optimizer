@@ -67,6 +67,7 @@ from apps.api.backends.chunks import (
     ToolCall,
 )
 from apps.api.backends.cost import DEFAULT_PER_TURN_COST_USD
+from apps.api.backends.logging_filter import _redact_text
 from apps.api.backends.openrouter.cost import OpenRouterCostTracker
 from apps.api.backends.pricing import PricingTable
 from apps.api.backends.protocol import AdapterOptions, Message
@@ -290,7 +291,7 @@ class OpenRouterAdapter:
                 if tracker.over_cap():
                     yield StreamError(
                         code="cost_cap_exceeded",
-                        message=(
+                        message=_redact_text(
                             f"Cost cap ${tracker.max_cost_usd:.6f} exceeded "
                             f"(used ${tracker.total():.6f})."
                         ),
@@ -313,7 +314,7 @@ class OpenRouterAdapter:
             # Pattern 7: emit terminal pair, then re-raise (PEP 789).
             yield StreamError(
                 code="cancelled",
-                message="Stream cancelled by caller.",
+                message=_redact_text("Stream cancelled by caller."),
                 retriable=True,
             )
             yield Done(
@@ -330,7 +331,7 @@ class OpenRouterAdapter:
         except AuthenticationError as exc:
             yield StreamError(
                 code="auth_failed",
-                message=str(exc),
+                message=_redact_text(str(exc)),
                 retriable=False,
             )
             yield Done(routing_signals=options.routing_signals)
@@ -338,7 +339,7 @@ class OpenRouterAdapter:
         except APITimeoutError as exc:
             yield StreamError(
                 code="timeout",
-                message=str(exc),
+                message=_redact_text(str(exc)),
                 retriable=True,
             )
             yield Done(routing_signals=options.routing_signals)
@@ -351,7 +352,7 @@ class OpenRouterAdapter:
             )
             yield StreamError(
                 code=code,
-                message=str(exc),
+                message=_redact_text(str(exc)),
                 retriable=(code == "rate_limited"),
             )
             yield Done(routing_signals=options.routing_signals)
@@ -360,7 +361,7 @@ class OpenRouterAdapter:
             logger.exception("OpenRouter adapter internal error")
             yield StreamError(
                 code="internal_error",
-                message=f"{type(exc).__name__}: {exc}",
+                message=_redact_text(f"{type(exc).__name__}: {exc}"),
                 retriable=False,
             )
             yield Done(routing_signals=options.routing_signals)
