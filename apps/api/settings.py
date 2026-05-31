@@ -74,6 +74,17 @@ def _default_settings() -> dict:
     Pydantic-merge baseline for ``PATCH /api/v1/settings`` (Wave 6).
     Returns a fresh dict per call so callers cannot mutate the
     "defaults" by accident.
+
+    DEBT-05 (Phase 9, Plan 05): ``priority`` / ``cost_aware_fallback`` /
+    ``zero_data_retention`` are the Phase-7 routing preferences. They were
+    previously supplied inline only by ``_mask_settings_for_response`` at
+    response time, so they were never PERSISTED on first boot and a
+    partial PATCH that omitted them dropped them from the merge baseline.
+    They now live in the canonical defaults so the server is the
+    system-of-record the Plan-04 modal reads back. The values MUST match
+    the modal defaults (``RoutingPrefsProvider.tsx:35-47``):
+    ``priority="quality"``, ``cost_aware_fallback=False``,
+    ``zero_data_retention=False``.
     """
 
     return {
@@ -84,6 +95,11 @@ def _default_settings() -> dict:
         },
         "computer_use_opt_in": False,
         "default_max_cost_usd": 0.50,
+        # DEBT-05 routing preferences — persisted first-boot + PATCH-merge
+        # baseline. Match the modal defaults (RoutingPrefsProvider.tsx).
+        "priority": "quality",
+        "cost_aware_fallback": False,
+        "zero_data_retention": False,
     }
 
 
