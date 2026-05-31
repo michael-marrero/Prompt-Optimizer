@@ -1450,3 +1450,207 @@ def test_adapter_options_constructible_with_no_ceiling_args() -> None:
     opts = AdapterOptions()
     assert opts.wall_clock_s == 120.0
     assert opts.usd_backstop == 0.50
+
+
+# =====================================================================
+# Phase 9 09-05 Task 1 — cancel persists the partial (RELI-03 / D-06)
+# + per-backend cancellation budget (Open Question 2)
+# =====================================================================
+#
+# RESEARCH Pitfall 5: trigger the teardown via ``task.cancel()`` on the
+# task driving the SERVER-side ``event_stream`` generator — NOT a faked
+# ``is_disconnected()`` (a no-op under ASGITransport). We drive the
+# route handler's returned EventSourceResponse ``body_iterator`` directly
+# so the CancelledError lands inside the generator after a TextDelta is
+# buffered but before the adapter's Done, then assert the ``finally``
+# block persisted the PARTIAL content_blocks with status='cancelled'.
+
+
+class _HangAfterDeltaAdapter:
+    """Yield one TextDelta, then await forever (until cancelled).
+
+    Models the real "mid-stream client disconnect" shape: a partial
+    answer has reached the buffer (one ``text_delta``) but the adapter
+    has NOT yet produced its terminal ``Done`` when the cancellation
+    arrives. The infinite await is what ``task.cancel()`` interrupts,
+    so the route's ``except asyncio.CancelledError`` handler fires with
+    a non-empty buffer (the buffered partial).
+    """
+
+    def __init__(self) -> None:
+        self.teardown_ran = False
+
+    async def stream(self, prompt, history, options):
+        from apps.api.backends.chunks import TextDelta
+
+        try:
+            yield TextDelta(text="partial-answer")
+            # Hang until the consumer task is cancelled — the generator's
+            # GeneratorExit/CancelledError on aclose() drives this teardown.
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            # The upstream adapter teardown (in_flight.close / interrupt /
+            # aclose) runs here on the real adapters; record that it ran.
+            self.teardown_ran = True
+            raise
+
+
+@pytest.mark.timeout(10)
+async def test_cancel_persists_partial_with_cancelled_status(
+    monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    """A task.cancel() mid-stream persists the partial with status='cancelled'.
+
+    D-06 keep-partial: after a buffered ``text_delta``, a cancellation
+    must reach ``persist_turn`` with (a) ``status='cancelled'`` and (b)
+    the buffered partial content present (the partial is NOT dropped).
+    We spy on ``persist_turn`` to capture the exact ``buffer`` + ``status``
+    the route handed it.
+    """
+
+    app = _fresh_app(monkeypatch, tmp_path)
+
+    from apps.api.backends.chunks import StreamError, TextDelta
+    import apps.api.routes.turn as turn_mod
+
+    fake = _HangAfterDeltaAdapter()
+    app.state.adapters = {"openrouter": fake}
+
+    from src.routing.schema import RoutingDecision
+
+    def fake_decide(*args, **kwargs):
+        return RoutingDecision(
+            backend="openrouter",
+            model_or_agent="openai/gpt-5",
+            rationale="test",
+            confidence=0.9,
+            signals={},
+        )
+
+    monkeypatch.setattr(turn_mod, "decide", fake_decide)
+
+    # Spy on persist_turn — capture the buffer + status the route passes.
+    captured: dict = {}
+
+    async def spy_persist_turn(db, *, buffer, status, **kwargs):
+        captured["buffer"] = list(buffer)
+        captured["status"] = status
+
+    monkeypatch.setattr(turn_mod, "persist_turn", spy_persist_turn)
+
+    async with app.router.lifespan_context(app):
+        async with httpx.AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test"
+        ) as client:
+            thread_id = await _create_thread(client)
+
+        # Build a Request and call the route handler directly so we own
+        # the SERVER-side generator (Pitfall 6: cancelling the httpx
+        # consumer does NOT inject http.disconnect under ASGITransport).
+        from fastapi import Request
+        from apps.api.routes.turn import TurnRequest, post_turn
+
+        scope = {
+            "type": "http",
+            "method": "POST",
+            "path": f"/api/v1/threads/{thread_id}/turn",
+            "headers": [],
+            "query_string": b"",
+            "app": app,
+        }
+
+        async def _receive():
+            # Never signal disconnect — the cancellation comes from
+            # task.cancel(), not the ASGI receive channel.
+            return {"type": "http.request", "body": b"", "more_body": False}
+
+        request = Request(scope, receive=_receive)
+        response = await post_turn(
+            thread_id, TurnRequest(message="hi"), request
+        )
+
+        # Drive the SSE generator until the partial text_delta is on the
+        # wire, then cancel the driving task mid-await.
+        body_iter = response.body_iterator
+        saw_partial = asyncio.Event()
+
+        async def drive() -> None:
+            async for event in body_iter:
+                payload = getattr(event, "data", "") or ""
+                if '"partial-answer"' in payload:
+                    saw_partial.set()
+
+        task = asyncio.create_task(drive())
+        await asyncio.wait_for(saw_partial.wait(), timeout=5.0)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+    # D-06: persist_turn must have been called with the PARTIAL buffer
+    # and status='cancelled'.
+    assert captured.get("status") == "cancelled", (
+        f"a cancelled turn must persist status='cancelled'; "
+        f"got {captured.get('status')!r}"
+    )
+    buffer = captured.get("buffer") or []
+    text_deltas = [c for c in buffer if isinstance(c, TextDelta)]
+    assert text_deltas, (
+        "the buffered partial (text_delta) must be persisted, not dropped "
+        "— D-06 keep-partial"
+    )
+    assert any(c.text == "partial-answer" for c in text_deltas), (
+        "the exact buffered partial content must survive into persist_turn"
+    )
+    # The terminal pair the handler appends must yield a 'cancelled' error.
+    errors = [c for c in buffer if isinstance(c, StreamError)]
+    assert errors and errors[-1].code == "cancelled", (
+        "the cancellation terminal pair must carry StreamError(cancelled)"
+    )
+    # The upstream adapter teardown ran (no orphaned upstream work).
+    assert fake.teardown_ran, (
+        "the adapter's CancelledError teardown must run on cancel "
+        "(no orphaned upstream spend — T-09-04)"
+    )
+
+
+def test_resolve_cancel_budget_per_backend(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Open Question 2: cancel budget is per-backend (chat ~2s; agents >2s).
+
+    Chat (openrouter) defaults to the BACKEND-07 ~2s budget; the agent
+    backends (claude_code / computer_use) default to a higher ceiling so
+    slow Playwright / subprocess teardown is not truncated. Each is
+    overridable from a per-backend env knob (mirrors the RELI-02 ceiling
+    resolver).
+    """
+
+    from apps.api.routes.turn import _resolve_cancel_budget
+
+    # Unset → defaults: chat 2.0s, agents 5.0s.
+    for backend in ("openrouter", "claude_code", "computer_use"):
+        monkeypatch.delenv(f"RELI_{backend.upper()}_CANCEL_S", raising=False)
+    assert _resolve_cancel_budget("openrouter") == 2.0, (
+        "chat cancel budget defaults to ~2s (BACKEND-07 / API-06)"
+    )
+    assert _resolve_cancel_budget("claude_code") > 2.0, (
+        "agent cancel budget must exceed the 2s chat ceiling (Open Question 2)"
+    )
+    assert _resolve_cancel_budget("computer_use") > 2.0, (
+        "computer-use cancel budget must exceed the 2s chat ceiling"
+    )
+
+    # Present env knob → its value (the budget is operator-tunable).
+    monkeypatch.setenv("RELI_CLAUDE_CODE_CANCEL_S", "8")
+    assert _resolve_cancel_budget("claude_code") == 8.0, (
+        "RELI_CLAUDE_CODE_CANCEL_S must override the agent default"
+    )
+
+
+def test_adapter_options_carries_cancel_budget() -> None:
+    """The frozen AdapterOptions exposes cancel_budget_s with a 2s default."""
+
+    from apps.api.backends.protocol import AdapterOptions
+
+    opts = AdapterOptions()
+    assert opts.cancel_budget_s == 2.0

@@ -258,6 +258,28 @@ _BACKEND_CEILING_ENV: dict[str, tuple[str, str]] = {
 }
 
 
+# RELI-03 / D-06 (Open Question 2): per-backend CANCELLATION budget — the
+# teardown window honored on a client disconnect. Chat is a single socket
+# close (~2s, the BACKEND-07 / API-06 budget); the agent backends drive a
+# subprocess interrupt (Claude Code) or a Playwright page close
+# (computer-use) that legitimately needs a few seconds, so a flat 2s
+# ceiling would TRUNCATE slow agent teardown. Distinct from the wall-clock
+# kill-switch above (which bounds the live turn, not the teardown).
+_BACKEND_CANCEL_BUDGET_DEFAULTS: dict[str, float] = {
+    "openrouter": 2.0,
+    "claude_code": 5.0,
+    "computer_use": 5.0,
+}
+
+# Env knob names per backend for the cancel budget (mirrors the ceiling
+# resolver convention). Absent → the default above; present → its value.
+_BACKEND_CANCEL_BUDGET_ENV: dict[str, str] = {
+    "openrouter": "RELI_OPENROUTER_CANCEL_S",
+    "claude_code": "RELI_CLAUDE_CODE_CANCEL_S",
+    "computer_use": "RELI_COMPUTER_USE_CANCEL_S",
+}
+
+
 def _resolve_env_float(name: str, default: float) -> float:
     """Return ``float(os.environ[name])`` or ``default`` when unset/invalid.
 
@@ -300,6 +322,29 @@ def _resolve_backend_ceilings(backend: str) -> tuple[float, float]:
     wall_clock_s = _resolve_env_float(wall_env, wall_default)
     usd_backstop = _resolve_env_float(usd_env, usd_default)
     return wall_clock_s, usd_backstop
+
+
+def _resolve_cancel_budget(backend: str) -> float:
+    """Resolve the per-backend cancellation budget (RELI-03 / D-06, OQ2).
+
+    Reads the per-backend env knob (``RELI_<BACKEND>_CANCEL_S``); falls
+    back to ``_BACKEND_CANCEL_BUDGET_DEFAULTS`` when unset (chat 2.0s,
+    agents 5.0s). An unknown backend (unreachable — the Backend literal
+    constrains the value) falls back to the conservative chat budget so a
+    teardown can never block the re-raise indefinitely.
+
+    This is the window ``turn.py`` waits for the upstream adapter's
+    CancelledError teardown (socket close / subprocess interrupt /
+    Playwright page close) before letting the re-raise propagate — slow
+    agent teardown gets its full budget; a hung teardown cannot wedge the
+    cancellation past it.
+    """
+
+    default = _BACKEND_CANCEL_BUDGET_DEFAULTS.get(backend, 2.0)
+    env_name = _BACKEND_CANCEL_BUDGET_ENV.get(
+        backend, "RELI_OPENROUTER_CANCEL_S"
+    )
+    return _resolve_env_float(env_name, default)
 
 
 # --------------------------------------------------------------------
@@ -841,6 +886,12 @@ async def post_turn(
     # the adapter's own cost_cap_exceeded.
     wall_clock_s, usd_backstop = _resolve_backend_ceilings(decision.backend)
 
+    # RELI-03 / D-06 (Open Question 2): resolve the per-backend
+    # cancellation budget — chat ~2s, agents ~5s — so slow agent teardown
+    # (subprocess interrupt / Playwright close) is not truncated by the
+    # chat-tier 2s ceiling on a client disconnect.
+    cancel_budget_s = _resolve_cancel_budget(decision.backend)
+
     options = AdapterOptions(
         model=decision.model_or_agent,
         max_cost_usd=max_cost_usd,
@@ -854,6 +905,7 @@ async def post_turn(
         routing_signals=decision.signals,
         wall_clock_s=wall_clock_s,
         usd_backstop=usd_backstop,
+        cancel_budget_s=cancel_budget_s,
     )
 
     # ----------------------------------------------------------------
@@ -910,6 +962,12 @@ async def post_turn(
         # stream is re-established after a full-jitter backoff.
         attempt = 0
         first_chunk_seen = False
+        # RELI-03 / D-06 (Open Question 2): the live adapter generator, so
+        # the cancellation handler can drive + BOUND its teardown
+        # (in_flight.close / interrupt / aclose) by the per-backend
+        # ``cancel_budget_s``. Hoisted out of the inner loop so the
+        # ``except asyncio.CancelledError`` block can reach the active one.
+        active_stream_iter: Any = None
         try:
             while True:
                 # ``retrying`` marks that THIS attempt already hit a
@@ -930,6 +988,7 @@ async def post_turn(
                 stream_iter = adapter.stream(
                     body.message, adapter_history, options
                 ).__aiter__()
+                active_stream_iter = stream_iter
                 while True:
                     # Remaining wall-clock budget bounds this pull. A
                     # non-positive remainder means the deadline already
@@ -1081,8 +1140,13 @@ async def post_turn(
             # Pattern 7 + PEP 789: emit terminal pair into the buffer
             # AND the wire so the client + persistence both see the
             # cancellation, THEN re-raise so the upstream adapter's
-            # CancelledError handler closes the provider connection
-            # within the 2-second BACKEND-07 / API-06 budget.
+            # CancelledError handler closes the provider connection.
+            #
+            # D-06 keep-partial: the buffer already carries every chunk
+            # forwarded before the cancel (the partial ``text_delta``s),
+            # so appending the terminal pair here means the ``finally``
+            # block's ``persist_turn`` writes the PARTIAL content_blocks
+            # with status='cancelled' — the stopped turn survives reload.
             err = StreamError(
                 code="cancelled",
                 # SECURE-07 uniformity: every StreamError.message
@@ -1099,6 +1163,37 @@ async def post_turn(
             yield ServerSentEvent(
                 event=done.type, data=done.model_dump_json()
             )
+            # RELI-03 / D-06 (Open Question 2): drive the upstream adapter's
+            # CancelledError teardown (OpenRouter in_flight.close / Claude
+            # Code interrupt+disconnect / computer-use Playwright aclose)
+            # and BOUND it by the PER-BACKEND ``cancel_budget_s`` — chat
+            # ~2s, agents ~5s. ``aclose()`` throws GeneratorExit into the
+            # adapter generator, running its teardown; ``shield`` lets that
+            # teardown finish even though THIS task is being cancelled,
+            # while ``wait_for`` caps the wait so a hung teardown can never
+            # block the re-raise past the budget (slow agent teardown gets
+            # its full window; it is NOT truncated to the 2s chat ceiling).
+            if active_stream_iter is not None:
+                aclose = getattr(active_stream_iter, "aclose", None)
+                if aclose is not None:
+                    try:
+                        await asyncio.wait_for(
+                            asyncio.shield(aclose()),
+                            timeout=options.cancel_budget_s,
+                        )
+                    except (asyncio.TimeoutError, asyncio.CancelledError):
+                        # Budget exhausted (or this task re-cancelled mid
+                        # teardown): stop waiting and let the re-raise
+                        # propagate. The shielded aclose keeps running to
+                        # completion in the background so the provider
+                        # connection still closes — we simply do not block
+                        # the cancellation past the budget.
+                        pass
+                    except Exception:
+                        # A teardown that raises (e.g. closing an already
+                        # closed subprocess) must never mask the
+                        # cancellation; swallow and re-raise below.
+                        pass
             raise
         finally:
             # STORE-05 + D-04: ONE BEGIN/COMMIT on Done.
