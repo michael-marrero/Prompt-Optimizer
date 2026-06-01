@@ -39,7 +39,6 @@ from inspect_ai.scorer import (
     CORRECT,
     INCORRECT,
     Score,
-    SampleScore,
     Target,
     Value,
     accuracy,
@@ -57,6 +56,33 @@ _CHEAP_BACKENDS = frozenset({"openrouter"})
 _EXPENSIVE_BACKENDS = frozenset({"claude_code", "computer_use"})
 
 
+def _as_score(item) -> Score:
+    """Normalize a metric's input element to a `Score`.
+
+    inspect-ai 0.3.232 calls in-run metrics with bare `Score` objects, while the
+    post-hoc `read_eval_log` representation wraps them in `SampleScore` (which has
+    a `.score` attribute). Accept either so the metric is robust across both
+    code paths (the live run AND a log-replay / unit test).
+    """
+    return getattr(item, "score", item)
+
+
+def _is_correct(score: Score) -> bool:
+    """True iff the score represents a correct (CORRECT / 1.0) outcome.
+
+    inspect-ai 0.3.232 normalizes the Score value to a float (1.0/0.0) before
+    handing scores to in-run metrics, while a log-replay carries the original
+    `CORRECT`/`INCORRECT` ("C"/"I") string. Accept either representation.
+    """
+    value = score.value
+    if value == CORRECT:
+        return True
+    try:
+        return float(value) == 1.0
+    except (TypeError, ValueError):
+        return False
+
+
 @metric
 def router08_cheap_to_expensive_misroute_rate() -> "metric":
     """D2 ROUTER-08 cost-asymmetry cell (measurement only).
@@ -67,11 +93,11 @@ def router08_cheap_to_expensive_misroute_rate() -> "metric":
     to measure).
     """
 
-    def metric_fn(scores: list[SampleScore]) -> Value:
+    def metric_fn(scores: list) -> Value:
         cheap_gold = 0
         misrouted_up = 0
-        for sample_score in scores:
-            meta = sample_score.score.metadata or {}
+        for item in scores:
+            meta = _as_score(item).metadata or {}
             gold = meta.get("gold_backend")
             predicted = meta.get("predicted_backend")
             if gold in _CHEAP_BACKENDS:
@@ -91,16 +117,17 @@ def per_backend_accuracy() -> "metric":
     systematically misses stays visible even when overall accuracy looks fine.
     """
 
-    def metric_fn(scores: list[SampleScore]) -> Value:
+    def metric_fn(scores: list) -> Value:
         totals: dict[str, int] = {}
         correct: dict[str, int] = {}
-        for sample_score in scores:
-            meta = sample_score.score.metadata or {}
+        for item in scores:
+            score = _as_score(item)
+            meta = score.metadata or {}
             gold = meta.get("gold_backend")
             if gold is None:
                 continue
             totals[gold] = totals.get(gold, 0) + 1
-            if sample_score.score.value == CORRECT:
+            if _is_correct(score):
                 correct[gold] = correct.get(gold, 0) + 1
         return {
             f"accuracy_{backend}": (correct.get(backend, 0) / count if count else 0.0)
