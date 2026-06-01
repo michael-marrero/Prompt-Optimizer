@@ -1,0 +1,19 @@
+{"prompt_id": "router08-haiku-001", "prompt": "Compose a three-line haiku about a quiet harbor at dawn.", "gold_backend": "openrouter"}
+{"prompt_id": "router08-fizzbuzz-002", "prompt": "Show me the classic fizzbuzz snippet printed in Python, just the code block.", "gold_backend": "openrouter"}
+{"prompt_id": "router08-oneliner-003", "prompt": "Give me a one-liner that reverses a string in Ruby.", "gold_backend": "openrouter"}
+{"prompt_id": "router08-snippet-004", "prompt": "Write a tiny function that returns the factorial of n, nothing else.", "gold_backend": "openrouter"}
+{"prompt_id": "chat-happy-005", "prompt": "Explain in two sentences why the sky appears blue during the daytime.", "gold_backend": "openrouter"}
+{"prompt_id": "chat-happy-006", "prompt": "What were the main causes that led to the fall of the Western Roman Empire?", "gold_backend": "openrouter"}
+{"prompt_id": "chat-happy-007", "prompt": "Summarize the plot of Pride and Prejudice for a book club newsletter.", "gold_backend": "openrouter"}
+{"prompt_id": "chat-happy-008", "prompt": "Translate the phrase 'good morning, dear friend' into formal Japanese.", "gold_backend": "openrouter"}
+{"prompt_id": "code-build-009", "prompt": "Refactor the authentication module in this repository to use dependency injection and add unit tests for the login flow.", "gold_backend": "claude_code"}
+{"prompt_id": "code-build-010", "prompt": "Scaffold a new FastAPI service with a health endpoint, a Dockerfile, and a pytest suite, then wire it into the existing project layout.", "gold_backend": "claude_code"}
+{"prompt_id": "code-build-011", "prompt": "Edit the billing package to add idempotency keys to every webhook handler and update the integration tests accordingly.", "gold_backend": "claude_code"}
+{"prompt_id": "code-build-012", "prompt": "Implement a caching decorator across the data-access layer and migrate the three callers that currently query the database directly.", "gold_backend": "claude_code"}
+{"prompt_id": "browse-act-013", "prompt": "Open the GitHub trending page, click into the top repository, and report its star count back to me.", "gold_backend": "computer_use"}
+{"prompt_id": "browse-act-014", "prompt": "Navigate to the city transit website, fill in tomorrow's date in the schedule form, and submit it to find the first morning departure.", "gold_backend": "computer_use"}
+{"prompt_id": "browse-act-015", "prompt": "Visit the weather dashboard, switch the units toggle to Celsius, and tell me the current reading for Lisbon.", "gold_backend": "computer_use"}
+{"prompt_id": "fallback-016", "prompt": "hmm not sure, maybe the thing with the stuff from before?", "gold_backend": "openrouter"}
+{"prompt_id": "fallback-017", "prompt": "asdf qwerty zxcv please advise thanks", "gold_backend": "openrouter"}
+{"prompt_id": "fallback-018", "prompt": "do the needful regarding that earlier matter at your discretion", "gold_backend": "openrouter"}
+{"prompt_id": "fallback-019", "prompt": "it depends; could you just handle whatever seems most reasonable here", "gold_backend": "openrouter"}
