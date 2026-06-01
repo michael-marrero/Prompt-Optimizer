@@ -99,18 +99,21 @@ def _default_adapter_factory(backend: str) -> Any:
 
 @solver
 def adapter_solver(
-    backend: str,
+    backend: str | None = None,
     *,
     adapter_factory: Callable[[str], Any] | None = None,
 ):
     """Drive an apps.api.backends streaming adapter and score its artifacts.
 
-    `backend` selects which concrete adapter to build (claude_code /
-    computer_use / openrouter). `adapter_factory` is an injection seam: tests
-    pass a factory returning a mock adapter whose `stream(...)` replays a fixed
-    chunk list, so all five <behavior> cases are exercised key-free with NO
-    network. The live path uses `_default_adapter_factory`, which builds the
-    real adapter from env BYOK keys.
+    `backend` is the DEFAULT adapter to build (claude_code / computer_use /
+    openrouter). Because a Task has a single solver but the agentic dataset
+    mixes backends per task, the effective backend is read from each sample's
+    `task_spec["backend"]` when present, falling back to this `backend` arg —
+    so one `adapter_solver()` instance dispatches the right adapter per sample.
+    `adapter_factory` is an injection seam: tests pass a factory returning a
+    mock adapter whose `stream(...)` replays a fixed chunk list, so all five
+    <behavior> cases are exercised key-free with NO network. The live path uses
+    `_default_adapter_factory`, which builds the real adapter from env BYOK keys.
 
     The solver reads the per-task spec from `state.metadata["task_spec"]`
     (seeded by the suite's record_to_sample), builds `AdapterOptions` with the
@@ -130,7 +133,13 @@ def adapter_solver(
 
     async def solve(state: TaskState, generate: Generate) -> TaskState:
         spec = state.metadata.get("task_spec", {}) if state.metadata else {}
-        adapter = factory(backend)
+        effective_backend = spec.get("backend") or backend
+        if effective_backend is None:
+            raise ValueError(
+                "adapter_solver requires a backend — pass adapter_solver(backend=...) "
+                "or set task_spec['backend'] per sample."
+            )
+        adapter = factory(effective_backend)
 
         options = AdapterOptions(
             model=spec.get("model"),
@@ -171,7 +180,9 @@ def adapter_solver(
 
         # Bound the transcript so the judge window cannot overflow (T-10-INJ).
         completion = "".join(text_parts)[-_JUDGE_TRANSCRIPT_CHARS:]
-        state.output = ModelOutput.from_content(model=backend, content=completion)
+        state.output = ModelOutput.from_content(
+            model=effective_backend, content=completion
+        )
 
         state.metadata["adapter_usage_usd"] = usage_usd
         state.metadata["artifact_path"] = artifact_path
