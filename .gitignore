@@ -53,3 +53,6 @@ apps/web/.env.local
 
 # pnpm content-addressable cache (pnpm 11 default in-repo store)
 .pnpm-store/
+
+# inspect-ai eval logs (Phase 10 EVAL harness — `.eval` / `inspect view` log dir)
+logs/
