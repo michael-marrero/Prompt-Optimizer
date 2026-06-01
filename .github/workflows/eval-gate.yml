@@ -1,0 +1,113 @@
+name: Eval gate (EVAL-04)
+
+# EVAL-04 — the merge gate for the routing brain + agentic backends.
+#
+# Layer ordering (highest-stakes, free checks first — catch contamination /
+# D-18 breaches BEFORE any API credit is spent):
+#   Job 1 (gate, free, key-free, runs on every matching PR):
+#     1. Layer-0 pytest: test_canary_disjoint.py + test_import_graph.py
+#        (checkout `lfs: true` REQUIRED so disjointness reads real prompts, not
+#        unmaterialized git-LFS pointers — 10-RESEARCH §Pitfall 2 / threat
+#        T-10-LFS2; the disjointness test FAILS, not skips, on a pointer).
+#     2. The free routing gate: `python -m eval.ci_gate --suites routing`
+#        (key-free — the routing suite calls decide() locally, token_limit=0).
+#   Job 2 (agentic real-spend, secret-gated + workflow_dispatch only):
+#     Mirrors live-smoke.yml — `if: secrets.ANTHROPIC_API_KEY != ''` so fork PRs
+#     no-op and never see secrets (threat T-10-FORK). continue-on-error so a
+#     provider hiccup never reds the repo. The per-suite USD ceiling in
+#     eval.ci_gate is the OUTER wallet guard (threat T-10-CEIL).
+
+on:
+  pull_request:
+    paths:
+      - "src/routing/**"
+      - "apps/api/backends/**"
+      - "eval/**"
+  workflow_dispatch:
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Job 1 — free, key-free deterministic PR gate (Layer-0 checks THEN routing).
+  # ---------------------------------------------------------------------------
+  gate:
+    name: Layer-0 + routing gate (free)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout (with LFS so disjointness reads real prompts — Pitfall 2)
+        uses: actions/checkout@v4
+        with:
+          lfs: true
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          enable-cache: true
+
+      - name: Install Python 3.11
+        run: uv python install 3.11
+
+      - name: Sync dependencies (locked, pulls the eval extra)
+        run: uv sync --locked --all-extras --dev
+
+      - name: Pre-fetch NLTK data (decide() triggers a punkt download)
+        run: |
+          uv run python -c "import nltk; nltk.download('punkt_tab', quiet=True); nltk.download('punkt', quiet=True)"
+
+      # Layer-0 FIRST: block a merge on contamination (canary not hash-disjoint
+      # from tuning CSVs) or a D-18 import-graph breach BEFORE any spend.
+      - name: Layer-0 — disjointness + import-graph (free, key-free)
+        run: |
+          uv run pytest -x -q \
+            eval/tests/test_canary_disjoint.py \
+            eval/tests/test_import_graph.py
+
+      # Free routing gate — key-free (decide() in-process, token_limit=0). The
+      # 3-epoch multi-run absorbs sub-std-dev noise (threat T-10-FLAKY).
+      - name: Routing gate — eval.ci_gate (free, key-free)
+        run: uv run python -m eval.ci_gate --suites routing --epochs 3
+
+  # ---------------------------------------------------------------------------
+  # Job 2 — agentic real-spend gate. Secret-gated + workflow_dispatch only so
+  # fork PRs no-op and never touch repo secrets (threat T-10-FORK). The OUTER
+  # USD ceiling lives in eval.ci_gate (SUITE_USD_CEILING["agentic"]).
+  # ---------------------------------------------------------------------------
+  agentic:
+    name: Agentic real-spend gate (secret-gated)
+    runs-on: ubuntu-latest
+    # Mirror live-smoke.yml: no secret -> the job no-ops on fork PRs.
+    if: ${{ secrets.ANTHROPIC_API_KEY != '' }}
+    steps:
+      - name: Checkout (with LFS)
+        uses: actions/checkout@v4
+        with:
+          lfs: true
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          enable-cache: true
+
+      - name: Install Python 3.11
+        run: uv python install 3.11
+
+      - name: Sync dependencies (locked, pulls the eval extra)
+        run: uv sync --locked --all-extras --dev
+
+      - name: Pre-fetch NLTK data (decide() triggers a punkt download)
+        run: |
+          uv run python -c "import nltk; nltk.download('punkt_tab', quiet=True); nltk.download('punkt', quiet=True)"
+
+      # computer_use tasks need a real browser + the D-12 STRICT-AND env opt-in.
+      - name: Install Playwright Chromium (computer-use tasks)
+        run: |
+          uv run python -m playwright install --with-deps chromium
+
+      # Real spend — env-inject the secret + the computer-use opt-in. The
+      # aggregate USD ceiling in eval.ci_gate hard-stops a runaway run;
+      # continue-on-error so a provider hiccup never reds the repo.
+      - name: Agentic gate — eval.ci_gate (real spend, BYOK)
+        continue-on-error: true
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          COMPUTER_USE_OPT_IN: "1"
+        run: uv run python -m eval.ci_gate --suites agentic --epochs 3
