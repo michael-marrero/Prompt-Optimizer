@@ -870,7 +870,8 @@ async def test_routing_decision_event_arrives_first_and_matches_done(
     (the persistence-source guarantee) requires.
 
     Four independent assertions:
-      (a) first event on the wire is ``routing_decision``
+      (a) ``routing_decision`` precedes any chunk (after the Phase 11
+          ``turn_start`` envelope event that now leads the stream)
       (b) it arrives within 500ms (ASGITransport latency bound — the
           100ms target is for real-network; ASGITransport has no
           network)
@@ -968,12 +969,33 @@ async def test_routing_decision_event_arrives_first_and_matches_done(
                             # Pitfall 4 finite consume.
                             break
 
-    # ---- Assertion (a): first event is routing_decision ----
+    # ---- Assertion (a): routing_decision precedes any chunk ----
+    # Phase 11 (D-05) prepends a ``turn_start`` envelope event carrying
+    # the turn_id (the control-POST capability) as the generator's VERY
+    # first yield. ``routing_decision`` remains the first event AFTER that
+    # envelope and still arrives BEFORE any text_delta / other chunk — the
+    # genuine D-15 contract (chip data before chunks). The turn_start
+    # envelope is a named sibling lifecycle event, NOT a ChatChunk, so the
+    # frozen union is untouched.
     assert len(events) > 0, "expected at least one SSE event"
-    assert events[0][0] == "routing_decision", (
-        f"first event was {events[0][0]!r}, expected "
-        f"'routing_decision' — D-15 amendment requires the chip data "
-        f"to arrive on the wire BEFORE any text_delta or other chunk"
+    assert events[0][0] == "turn_start", (
+        f"first event was {events[0][0]!r}, expected 'turn_start' — "
+        f"Phase 11 D-05 turn_start envelope leads the stream"
+    )
+    event_names = [e[0] for e in events]
+    rd_idx = event_names.index("routing_decision")
+    first_chunk_idx = next(
+        (
+            i
+            for i, name in enumerate(event_names)
+            if name not in ("turn_start", "routing_decision")
+        ),
+        len(event_names),
+    )
+    assert rd_idx < first_chunk_idx, (
+        f"routing_decision (idx {rd_idx}) must arrive BEFORE any "
+        f"text_delta / other chunk (first chunk idx {first_chunk_idx}) — "
+        f"D-15 chip-before-chunks contract; got {event_names}"
     )
 
     # ---- Assertion (b): arrived within 500ms ----
@@ -986,7 +1008,7 @@ async def test_routing_decision_event_arrives_first_and_matches_done(
     )
 
     # ---- Assertion (c): 5-key structured payload ----
-    routing_payload = json.loads(events[0][1])
+    routing_payload = json.loads(events[rd_idx][1])
     assert set(routing_payload.keys()) == {
         "backend",
         "model_or_agent",

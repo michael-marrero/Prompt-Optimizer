@@ -152,6 +152,7 @@ from apps.api.backends.chunks import (
 from apps.api.backends.cost import DEFAULT_PER_TURN_COST_USD
 from apps.api.backends.logging_filter import _redact_text
 from apps.api.backends.protocol import AdapterOptions
+from apps.api.control.mailbox import ControlMailbox
 from apps.api.backends.protocol import Message as AdapterMessage
 from apps.api.blobs import _maybe_externalize_screenshot
 from apps.api.db.queries import (
@@ -772,6 +773,18 @@ async def post_turn(
 
     turn_id = secrets.token_urlsafe(12)
 
+    # Phase 11 (CTRL-01, D-05/RELI-03): mint + register the per-turn
+    # ControlMailbox BEFORE the streaming generator runs so a concurrent
+    # ``POST /turns/{turn_id}/control`` can find a live mailbox by
+    # ``turn_id`` (registry.get → 202) the moment this turn is addressable.
+    # Registered here (route scope) so it is guaranteed present before the
+    # event_stream generator's ``try``; the generator's ``finally``
+    # deregisters it on EVERY exit (happy / cancelled / kill / error) so
+    # the registry never leaks a dead turn (RELI-03 — a post-finish control
+    # POST then 404s). ``app.state.control_registry`` is seeded in lifespan.
+    mailbox = ControlMailbox()
+    app.state.control_registry[turn_id] = mailbox
+
     # D-19 INFO log #1 — turn_start. user_msg_len bounds the log
     # surface (the message body itself is never logged so the
     # RedactionFilter never sees prompt content).
@@ -906,6 +919,15 @@ async def post_turn(
         wall_clock_s=wall_clock_s,
         usd_backstop=usd_backstop,
         cancel_budget_s=cancel_budget_s,
+        # Phase 11 (CTRL-03): thread the per-turn mailbox into the AGENT
+        # backends only so each adapter can gate-and-drain at its D-15 step
+        # boundary. ``None`` for openrouter — the single-round-trip chat
+        # path is never gated (no inter-step boundary to gate at).
+        control_mailbox=(
+            mailbox
+            if decision.backend in ("claude_code", "computer_use")
+            else None
+        ),
     )
 
     # ----------------------------------------------------------------
@@ -934,6 +956,20 @@ async def post_turn(
         # test_turn_streaming.py::test_routing_decision_event...).
         # Yield happens BEFORE the try/except so a cancellation between
         # adapter creation and adapter.stream() still ships the chip data.
+        #
+        # Phase 11 (D-05): emit the ``turn_start`` named SSE event as the
+        # generator's VERY FIRST yield — it carries the ``turn_id`` so the
+        # client knows the capability to address a later control POST at
+        # ``POST /turns/{turn_id}/control``. It is a named SIBLING event
+        # (Seam A): the frozen 7-variant ChatChunk union is NOT extended,
+        # so the chunks.py contract + the Zod port stay byte-for-byte
+        # unchanged. Emitted before routing_decision so turn_id is on the
+        # wire first.
+        yield ServerSentEvent(
+            event="turn_start",
+            data=json.dumps({"turn_id": turn_id}),
+        )
+
         payload = {
             "backend": decision.backend,
             "model_or_agent": decision.model_or_agent,
@@ -1114,6 +1150,30 @@ async def post_turn(
                         event=chunk.type,
                         data=chunk.model_dump_json(),
                     )
+                    # Phase 11 Seam A (D-03/D-06/D-08): if a control message
+                    # is pending in this turn's mailbox, emit the
+                    # ``awaiting_approval`` named SSE event (D-08 — emit ONLY
+                    # when a message is pending) then drain the mailbox so
+                    # the no-op consumer continues. This is the Seam-A owner:
+                    # the SSE event is emitted ONLY here by the generator, a
+                    # named SIBLING of the frozen ChatChunk union (the
+                    # adapters NEVER yield ServerSentEvent — Pitfall 1). The
+                    # body fields beyond turn_id+correlation_id are
+                    # discretionary (the contract test freezes only the
+                    # ChatChunk union, not this event's shape).
+                    if mailbox.has_pending():
+                        yield ServerSentEvent(
+                            event="awaiting_approval",
+                            data=json.dumps(
+                                {
+                                    "turn_id": turn_id,
+                                    "correlation_id": secrets.token_urlsafe(
+                                        12
+                                    ),
+                                }
+                            ),
+                        )
+                        mailbox.drain_all()
                     if isinstance(chunk, Done):
                         # D-04 terminal-Done invariant — break so the
                         # finally block fires persist_turn.
@@ -1196,6 +1256,17 @@ async def post_turn(
                         pass
             raise
         finally:
+            # Phase 11 (RELI-03, T-11-08): deregister the per-turn mailbox
+            # on EVERY exit — happy path, client cancel, wall-clock / USD
+            # kill, or any error. This runs FIRST in the finally (before
+            # persist_turn) so the registry never leaks a dead turn even if
+            # persistence raises. A control POST after this point 404s
+            # (registry.get → None), proving the turn is no longer
+            # addressable (test_mailbox_deregistered_on_cancel). ``pop(...,
+            # None)`` is idempotent — safe even if the turn was never fully
+            # registered.
+            app.state.control_registry.pop(turn_id, None)
+
             # STORE-05 + D-04: ONE BEGIN/COMMIT on Done.
             #
             # The Phase 2 D-04 terminal-Done invariant guarantees the

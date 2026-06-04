@@ -159,20 +159,35 @@ def test_registry_deregister_missing_is_safe() -> None:
 def _fresh_control_app(monkeypatch: pytest.MonkeyPatch, tmp_path) -> typing.Any:
     """Reload paths under tmp_path and build a fresh app.
 
-    Mirrors ``test_feedback.py::_fresh_app``: monkeypatch
-    ``PROMPT_OPTIMIZER_HOME`` so DB_PATH lands under ``tmp_path``, then
-    reload ``apps.api.paths`` (and the lifespan/main modules that close
-    over it) so the lifespan opens a fresh migrated DB per test.
+    Mirrors ``test_turn_streaming.py::_fresh_app``: monkeypatch
+    ``PROMPT_OPTIMIZER_HOME`` so DB_PATH lands under ``tmp_path``, purge
+    ``sse_starlette`` (so the route's ``EventSourceResponse`` reload picks
+    up the current ``starlette.responses.Response`` identity — the D-18
+    smoke-test interaction), then reload paths + jsonl_log + lifespan +
+    the turn route + main so the lifespan opens a fresh migrated DB and
+    the turn handler closes over the fresh paths.
     """
 
     monkeypatch.setenv("PROMPT_OPTIMIZER_HOME", str(tmp_path))
+
+    import sys
+
+    for name in list(sys.modules):
+        if name.startswith("sse_starlette"):
+            del sys.modules[name]
+
     import apps.api.paths
 
     importlib.reload(apps.api.paths)
+    import apps.api.jsonl_log
 
+    importlib.reload(apps.api.jsonl_log)
     import apps.api.lifespan
 
     importlib.reload(apps.api.lifespan)
+    import apps.api.routes.turn
+
+    importlib.reload(apps.api.routes.turn)
     import apps.api.main
 
     importlib.reload(apps.api.main)
@@ -303,8 +318,226 @@ async def test_post_control_413_on_oversize_payload(
 # --------------------------------------------------------------------
 
 
-def test_awaiting_approval_event_fires_midturn() -> None:
-    pytest.skip("Plan 02 Task 2: awaiting_approval SSE event fires mid-turn")
+def _pin_decide_to(monkeypatch: pytest.MonkeyPatch, backend: str) -> None:
+    """Pin ``decide()`` to a fixed backend so a fake adapter is invoked."""
+
+    from src.routing.schema import RoutingDecision
+
+    def fake_decide(*args, **kwargs):
+        return RoutingDecision(
+            backend=backend,
+            model_or_agent="test-model",
+            rationale="test",
+            confidence=0.9,
+            signals={"task_type": "chat"},
+        )
+
+    monkeypatch.setattr("apps.api.routes.turn.decide", fake_decide)
+
+
+async def _create_thread(client) -> str:
+    resp = await client.post("/api/v1/threads", json={"title": "t"})
+    assert resp.status_code == 200, resp.text
+    return resp.json()["id"]
+
+
+async def test_awaiting_approval_event_fires_midturn(
+    monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    """A control POST mid-stream makes ``awaiting_approval`` appear on the wire.
+
+    Uses a GATED adapter that yields a first ``text_delta`` then BLOCKS on
+    an ``asyncio.Event`` until the test enqueues a control message into the
+    live turn's mailbox (directly — deterministic, no httpx-buffering
+    race). The gate then opens; the generator's Seam-A inter-chunk check
+    sees the pending message, emits ``awaiting_approval`` (D-06/D-08), and
+    drains the mailbox so the no-op consumer continues to a terminal
+    ``done``. The mailbox is then deregistered in the finally (RELI-03).
+    """
+
+    import asyncio
+    import json as _json
+    from typing import AsyncIterator
+
+    from apps.api.backends.chunks import ChatChunk, Done, TextDelta
+    from apps.api.backends.protocol import AdapterOptions, Message
+    from apps.api.control import ControlMessage
+
+    app = _fresh_control_app(monkeypatch, tmp_path)
+
+    first_yielded = asyncio.Event()
+    release = asyncio.Event()
+
+    class GatedAdapter:
+        async def stream(
+            self,
+            prompt: str,
+            history: list[Message],
+            options: AdapterOptions,
+        ) -> AsyncIterator[ChatChunk]:
+            yield TextDelta(text="one")
+            first_yielded.set()
+            # Block until the test has enqueued a control message so the
+            # Seam-A gate has something pending on the NEXT chunk.
+            await release.wait()
+            yield TextDelta(text="two")
+            yield Done(tokens_in=1, tokens_out=2, cost_usd=0.001, latency_ms=5)
+
+    app.state.adapters = {"openrouter": GatedAdapter()}
+    app.state.settings = {
+        "default_max_cost_usd": 0.50,
+        "computer_use_opt_in": False,
+    }
+    _pin_decide_to(monkeypatch, "openrouter")
+
+    async with app.router.lifespan_context(app):
+        async with httpx.AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test"
+        ) as client:
+            thread_id = await _create_thread(client)
+
+            events: list[str] = []
+            turn_id_holder: dict[str, str] = {}
+
+            async def consume() -> None:
+                current_event: str | None = None
+                async with client.stream(
+                    "POST",
+                    f"/api/v1/threads/{thread_id}/turn",
+                    json={"message": "hello"},
+                ) as resp:
+                    assert resp.status_code == 200, await resp.aread()
+                    async for line in resp.aiter_lines():
+                        if line.startswith("event:"):
+                            current_event = line.split(":", 1)[1].strip()
+                            events.append(current_event)
+                            if current_event == "done":
+                                break
+                        elif (
+                            line.startswith("data:")
+                            and current_event == "turn_start"
+                        ):
+                            turn_id_holder["id"] = _json.loads(
+                                line.split(":", 1)[1].strip()
+                            )["turn_id"]
+
+            task = asyncio.create_task(consume())
+
+            # Wait until the adapter has yielded its first chunk — the turn
+            # is now live and its mailbox is registered server-side.
+            await asyncio.wait_for(first_yielded.wait(), timeout=5)
+            # Resolve the live turn_id from the registry (single live turn).
+            for _ in range(50):
+                if app.state.control_registry:
+                    break
+                await asyncio.sleep(0.02)
+            assert app.state.control_registry, "mailbox never registered"
+            turn_id = next(iter(app.state.control_registry))
+            mailbox = app.state.control_registry[turn_id]
+
+            # Enqueue a pending control message directly, THEN open the gate
+            # so the next inter-chunk Seam-A check fires awaiting_approval.
+            await mailbox.enqueue(ControlMessage(kind="approve"))
+            release.set()
+
+            await asyncio.wait_for(task, timeout=5)
+
+            assert "turn_start" in events
+            assert "awaiting_approval" in events, (
+                f"awaiting_approval never fired; events={events}"
+            )
+            assert events[-1] == "done", f"turn did not complete; events={events}"
+            # Seam A drained the mailbox; the finally deregistered it.
+            assert app.state.control_registry.get(turn_id) is None
+
+
+async def test_mailbox_deregistered_on_cancel(
+    monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    """A cancelled turn deregisters its mailbox; a later control POST 404s (RELI-03).
+
+    A gated adapter yields one chunk then blocks indefinitely so the turn
+    is genuinely mid-stream. The consumer task is cancelled (Pitfall 6 —
+    ``task.cancel()`` under ASGITransport, not response close); the turn's
+    ``finally`` runs the deregistration, after which a control POST 404s.
+    """
+
+    import asyncio
+    from typing import AsyncIterator
+
+    from apps.api.backends.chunks import ChatChunk, TextDelta
+    from apps.api.backends.protocol import AdapterOptions, Message
+
+    app = _fresh_control_app(monkeypatch, tmp_path)
+
+    first_yielded = asyncio.Event()
+    blocked = asyncio.Event()  # never set — the adapter blocks forever
+
+    class BlockingAdapter:
+        async def stream(
+            self,
+            prompt: str,
+            history: list[Message],
+            options: AdapterOptions,
+        ) -> AsyncIterator[ChatChunk]:
+            yield TextDelta(text="slow")
+            first_yielded.set()
+            await blocked.wait()  # block until the turn is cancelled
+
+    app.state.adapters = {"openrouter": BlockingAdapter()}
+    app.state.settings = {
+        "default_max_cost_usd": 0.50,
+        "computer_use_opt_in": False,
+    }
+    _pin_decide_to(monkeypatch, "openrouter")
+
+    async with app.router.lifespan_context(app):
+        async with httpx.AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test"
+        ) as client:
+            thread_id = await _create_thread(client)
+
+            async def consume() -> None:
+                async with client.stream(
+                    "POST",
+                    f"/api/v1/threads/{thread_id}/turn",
+                    json={"message": "hello"},
+                ) as resp:
+                    async for _line in resp.aiter_lines():
+                        pass
+
+            task = asyncio.create_task(consume())
+
+            # Wait until the adapter yielded its first chunk — the turn is
+            # live and its mailbox is registered server-side.
+            await asyncio.wait_for(first_yielded.wait(), timeout=5)
+            for _ in range(50):
+                if app.state.control_registry:
+                    break
+                await asyncio.sleep(0.02)
+            assert app.state.control_registry, "mailbox never registered"
+            turn_id = next(iter(app.state.control_registry))
+
+            # Cancel the consumer task → propagates CancelledError into the
+            # turn generator → its finally runs the deregistration.
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+
+            for _ in range(100):
+                if app.state.control_registry.get(turn_id) is None:
+                    break
+                await asyncio.sleep(0.02)
+
+            # A control POST after cancellation 404s — the mailbox was
+            # deregistered in turn.py's finally (RELI-03 / T-11-08).
+            r = await client.post(
+                f"/api/v1/turns/{turn_id}/control",
+                json={"kind": "approve"},
+            )
+            assert r.status_code == 404, r.text
 
 
 def test_gate_drain_claude_code() -> None:
@@ -313,7 +546,3 @@ def test_gate_drain_claude_code() -> None:
 
 def test_gate_drain_computer_use() -> None:
     pytest.skip("Plan 02 Task 3: control gate drains the mailbox on the computer-use path")
-
-
-def test_mailbox_deregistered_on_cancel() -> None:
-    pytest.skip("Plan 02 Task 2: mailbox is deregistered when the turn is cancelled")
