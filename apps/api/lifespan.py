@@ -174,6 +174,17 @@ async def lifespan(app: FastAPI):
         else:
             app.state.adapters = {}
 
+    # Step 6b — EMPTY per-turn control registry (Phase 11, CTRL-01).
+    # ``app.state.control_registry`` is a ``dict[str, ControlMailbox]``
+    # mirroring the ``app.state.adapters`` lifecycle: empty at startup,
+    # populated by ``turn.py`` (register before the try, deregister in
+    # finally), read by ``routes/control.py`` to deliver a control
+    # command to a live turn. Seeded unconditionally — a missing-key
+    # ``registry.get`` already 404s, but seeding keeps the route's
+    # ``getattr(... , "control_registry", None)`` guard a defensive
+    # belt rather than load-bearing.
+    app.state.control_registry = {}
+
     # Step 7 — cache schema_version once at startup (Open Question 5).
     # Wave 2 ``/healthz`` reads from ``app.state.schema_version``
     # directly; never re-queries SQLite per request.

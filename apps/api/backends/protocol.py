@@ -100,6 +100,13 @@ class AdapterOptions:
     # the teardown window honored on a client disconnect (resolved per
     # turn in turn.py; chat-tier 2.0s default below, agents 5.0s).
     cancel_budget_s: float = 2.0
+    # Phase 11 (CTRL-03): the per-turn ``ControlMailbox`` threaded into
+    # the agent backends so each adapter can gate-and-drain at its D-15
+    # step boundary. Additive-with-default (``None`` = no control channel,
+    # e.g. the openrouter chat path which is never gated). Typed ``Any``
+    # to avoid importing ``apps.api.control`` here (keeps protocol.py
+    # import-light); adapters duck-type ``.has_pending`` / ``.drain_all``.
+    control_mailbox: Any = None
 
 
 class BackendAdapter(Protocol):

@@ -23,7 +23,12 @@ Cross-refs:
 
 from __future__ import annotations
 
+import importlib
+import typing
+
+import httpx
 import pytest
+from httpx import ASGITransport
 from pydantic import ValidationError
 
 from apps.api.control import ControlMailbox, ControlMessage
@@ -142,31 +147,173 @@ def test_registry_deregister_missing_is_safe() -> None:
 
 
 # --------------------------------------------------------------------
-# Plan-02 INTEGRATION placeholders — named, body-level pytest.skip()
-# (visible to --collect-only, reported as skipped in a normal run).
-# Plan 02 EXTENDS this file by replacing these bodies with real tests.
+# Plan-02 INTEGRATION tests — the route + Seam-A wiring (this plan).
+#
+# These drive the real FastAPI app via httpx.ASGITransport (API-08 /
+# D-20 — never the synchronous test-client). ``PROMPT_OPTIMIZER_HOME``
+# redirects DB_PATH under tmp_path so the lifespan opens a throwaway
+# migrated DB and ``control_events`` row counts are isolated per test.
 # --------------------------------------------------------------------
 
 
-def test_post_control_202_on_live_turn() -> None:
-    pytest.skip("Plan 02: POST /control returns 202 on a live turn")
+def _fresh_control_app(monkeypatch: pytest.MonkeyPatch, tmp_path) -> typing.Any:
+    """Reload paths under tmp_path and build a fresh app.
+
+    Mirrors ``test_feedback.py::_fresh_app``: monkeypatch
+    ``PROMPT_OPTIMIZER_HOME`` so DB_PATH lands under ``tmp_path``, then
+    reload ``apps.api.paths`` (and the lifespan/main modules that close
+    over it) so the lifespan opens a fresh migrated DB per test.
+    """
+
+    monkeypatch.setenv("PROMPT_OPTIMIZER_HOME", str(tmp_path))
+    import apps.api.paths
+
+    importlib.reload(apps.api.paths)
+
+    import apps.api.lifespan
+
+    importlib.reload(apps.api.lifespan)
+    import apps.api.main
+
+    importlib.reload(apps.api.main)
+    return apps.api.main.create_app()
 
 
-def test_post_control_404_unknown_turn() -> None:
-    pytest.skip("Plan 02: POST /control returns 404 for an unknown turn")
+async def _count_control_events(db) -> int:
+    """Return the number of rows in ``control_events`` (D-07 audit)."""
+
+    async with db.execute("SELECT COUNT(*) FROM control_events") as cur:
+        row = await cur.fetchone()
+    return int(row[0])
+
+
+async def test_post_control_202_on_live_turn(
+    monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    """A directly-seeded live mailbox → 202 + enqueue + exactly one row (D-04/D-07)."""
+
+    app = _fresh_control_app(monkeypatch, tmp_path)
+    async with app.router.lifespan_context(app):
+        # Directly seed a live mailbox for a known turn_id (the turn loop
+        # registers it in production; here we register it by hand to prove
+        # the route's 202 path in isolation).
+        mailbox = ControlMailbox()
+        app.state.control_registry["turn_live"] = mailbox
+
+        before = await _count_control_events(app.state.db)
+
+        async with httpx.AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test"
+        ) as client:
+            resp = await client.post(
+                "/api/v1/turns/turn_live/control",
+                json={"kind": "approve", "payload": {"note": "ok"}},
+            )
+
+        assert resp.status_code == 202, resp.text
+        assert resp.json() == {"status": "accepted", "turn_id": "turn_live"}
+        # The message landed in the mailbox (enqueue happened).
+        assert mailbox.has_pending() is True
+        drained = mailbox.drain_all()
+        assert [m.kind for m in drained] == ["approve"]
+        # Exactly one control_events row persisted (D-07 persist-only-on-202).
+        after = await _count_control_events(app.state.db)
+        assert after == before + 1
+
+
+async def test_post_control_404_unknown_turn(
+    monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    """An unknown turn_id → 404 with NO control_events row written (D-07)."""
+
+    app = _fresh_control_app(monkeypatch, tmp_path)
+    async with app.router.lifespan_context(app):
+        before = await _count_control_events(app.state.db)
+
+        async with httpx.AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test"
+        ) as client:
+            resp = await client.post(
+                "/api/v1/turns/never_registered/control",
+                json={"kind": "approve"},
+            )
+
+        assert resp.status_code == 404, resp.text
+        # No persistence on the 404 path (D-07).
+        after = await _count_control_events(app.state.db)
+        assert after == before
+
+
+async def test_post_control_422_on_unknown_kind(
+    monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    """An unknown ``kind`` outside the closed Literal → 422 (no row written)."""
+
+    app = _fresh_control_app(monkeypatch, tmp_path)
+    async with app.router.lifespan_context(app):
+        # Seed a LIVE mailbox so the 422 is provably from the closed Literal
+        # (Pydantic body validation), not the 404 unknown-turn path.
+        app.state.control_registry["turn_live"] = ControlMailbox()
+        before = await _count_control_events(app.state.db)
+
+        async with httpx.AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test"
+        ) as client:
+            resp = await client.post(
+                "/api/v1/turns/turn_live/control",
+                json={"kind": "definitely_not_a_verb"},
+            )
+
+        assert resp.status_code == 422, resp.text
+        after = await _count_control_events(app.state.db)
+        assert after == before
+
+
+async def test_post_control_413_on_oversize_payload(
+    monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    """An oversize opaque payload → 413 BEFORE enqueue/persist (T-11-06)."""
+
+    app = _fresh_control_app(monkeypatch, tmp_path)
+    async with app.router.lifespan_context(app):
+        mailbox = ControlMailbox()
+        app.state.control_registry["turn_live"] = mailbox
+        before = await _count_control_events(app.state.db)
+
+        # Payload whose json.dumps length exceeds the 16384-char cap.
+        oversize = {"blob": "x" * 20000}
+
+        async with httpx.AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test"
+        ) as client:
+            resp = await client.post(
+                "/api/v1/turns/turn_live/control",
+                json={"kind": "approve", "payload": oversize},
+            )
+
+        assert resp.status_code == 413, resp.text
+        # Rejected before enqueue (nothing queued) and before persist.
+        assert mailbox.has_pending() is False
+        after = await _count_control_events(app.state.db)
+        assert after == before
+
+
+# --------------------------------------------------------------------
+# Plan-02 INTEGRATION placeholders for Tasks 2-3 (filled later in this plan).
+# --------------------------------------------------------------------
 
 
 def test_awaiting_approval_event_fires_midturn() -> None:
-    pytest.skip("Plan 02: awaiting_approval SSE event fires mid-turn")
+    pytest.skip("Plan 02 Task 2: awaiting_approval SSE event fires mid-turn")
 
 
 def test_gate_drain_claude_code() -> None:
-    pytest.skip("Plan 02: control gate drains the mailbox on the Claude Code path")
+    pytest.skip("Plan 02 Task 3: control gate drains the mailbox on the Claude Code path")
 
 
 def test_gate_drain_computer_use() -> None:
-    pytest.skip("Plan 02: control gate drains the mailbox on the computer-use path")
+    pytest.skip("Plan 02 Task 3: control gate drains the mailbox on the computer-use path")
 
 
 def test_mailbox_deregistered_on_cancel() -> None:
-    pytest.skip("Plan 02: mailbox is deregistered when the turn is cancelled")
+    pytest.skip("Plan 02 Task 2: mailbox is deregistered when the turn is cancelled")
