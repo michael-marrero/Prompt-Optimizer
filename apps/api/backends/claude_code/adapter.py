@@ -355,6 +355,17 @@ class ClaudeCodeAdapter:
 
                 if _is_assistant(msg):
                     steps.increment()  # D-15 — one step per AssistantMessage
+                    # Phase 11 (CTRL-03, Seam A): gate-and-drain the per-turn
+                    # control mailbox at this D-15 step boundary. The adapter
+                    # ONLY drains (FIFO, nothing stranded) — it NEVER emits a
+                    # named SSE event (Pitfall 1: that crosses the frozen
+                    # Phase-2 ChatChunk contract; the awaiting_approval emit is
+                    # owned by turn.py's generator). ``control_mailbox`` is None
+                    # when no control channel is wired (the no-op consumer just
+                    # drains and continues to the next step).
+                    mailbox = options.control_mailbox
+                    if mailbox is not None and mailbox.has_pending():
+                        mailbox.drain_all()
                     for block in getattr(msg, "content", []) or []:
                         if _is_text_block(block):
                             text = getattr(block, "text", "")

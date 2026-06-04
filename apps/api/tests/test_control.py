@@ -540,9 +540,131 @@ async def test_mailbox_deregistered_on_cancel(
             assert r.status_code == 404, r.text
 
 
-def test_gate_drain_claude_code() -> None:
-    pytest.skip("Plan 02 Task 3: control gate drains the mailbox on the Claude Code path")
+async def _drive_gate_drain_for_backend(
+    monkeypatch: pytest.MonkeyPatch, tmp_path, backend: str
+) -> None:
+    """Drive a multi-step turn for ``backend`` and assert the inter-step
+    D-15 gate drains an injected control message while the turn completes.
+
+    A gated adapter yields step-1's chunk, blocks until the test enqueues a
+    control message into the live mailbox, then yields step-2 (where its
+    D-15 boundary drains the mailbox) and a terminal Done. Because turn.py
+    threads ``control_mailbox`` ONLY for ``claude_code`` / ``computer_use``,
+    pinning decide() to ``backend`` exercises the real threading.
+    """
+
+    import asyncio
+    from typing import AsyncIterator
+
+    from apps.api.backends.chunks import ChatChunk, Done, TextDelta
+    from apps.api.backends.protocol import AdapterOptions, Message
+    from apps.api.control import ControlMessage
+
+    app = _fresh_control_app(monkeypatch, tmp_path)
+
+    first_yielded = asyncio.Event()
+    release = asyncio.Event()
+    drained_flag: dict[str, bool] = {}
+
+    class GatedStepAdapter:
+        """Two D-15 steps; drains the mailbox at the second step boundary."""
+
+        async def stream(
+            self,
+            prompt: str,
+            history: list[Message],
+            options: AdapterOptions,
+        ) -> AsyncIterator[ChatChunk]:
+            # Step 1 boundary (nothing pending yet).
+            yield TextDelta(text="step1")
+            first_yielded.set()
+            await release.wait()
+            # Step 2 boundary — mirror the agent adapters' gate-and-drain
+            # exactly (drain only, NEVER emit SSE).
+            mailbox = options.control_mailbox
+            if mailbox is not None and mailbox.has_pending():
+                mailbox.drain_all()
+            drained_flag["after_step2"] = (
+                mailbox is not None and not mailbox.has_pending()
+            )
+            yield TextDelta(text="step2")
+            yield Done(tokens_in=1, tokens_out=2, cost_usd=0.001, latency_ms=5)
+
+    app.state.adapters = {backend: GatedStepAdapter()}
+    app.state.settings = {
+        "default_max_cost_usd": 2.0,
+        "computer_use_opt_in": True,
+    }
+    # Drive via ``override_backend`` so the turn dispatches to ``backend``
+    # deterministically: the override path skips decide() AND the D-05
+    # allowlist post-filter, and the pre-cached fake adapter short-circuits
+    # ``_get_or_create_adapter`` before the computer_use STRICT-AND gate.
+    # turn.py threads ``control_mailbox`` for claude_code / computer_use
+    # regardless of how the backend was chosen, so this still exercises the
+    # real CTRL-03 threading.
+
+    events: list[str] = []
+
+    async with app.router.lifespan_context(app):
+        async with httpx.AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test"
+        ) as client:
+            thread_id = await _create_thread(client)
+
+            async def consume() -> None:
+                current_event: str | None = None
+                async with client.stream(
+                    "POST",
+                    f"/api/v1/threads/{thread_id}/turn",
+                    json={"message": "hello", "override_backend": backend},
+                ) as resp:
+                    assert resp.status_code == 200, await resp.aread()
+                    async for line in resp.aiter_lines():
+                        if line.startswith("event:"):
+                            current_event = line.split(":", 1)[1].strip()
+                            events.append(current_event)
+                            if current_event == "done":
+                                break
+
+            task = asyncio.create_task(consume())
+
+            await asyncio.wait_for(first_yielded.wait(), timeout=5)
+            for _ in range(50):
+                if app.state.control_registry:
+                    break
+                await asyncio.sleep(0.02)
+            assert app.state.control_registry, "mailbox never registered"
+            turn_id = next(iter(app.state.control_registry))
+            mailbox = app.state.control_registry[turn_id]
+
+            # Inject a control message BEFORE step 2, then release the gate.
+            await mailbox.enqueue(ControlMessage(kind="pause"))
+            assert mailbox.has_pending() is True
+            release.set()
+
+            await asyncio.wait_for(task, timeout=5)
+
+    # The step-2 D-15 boundary drained the injected message and the turn
+    # ran to completion (terminal done).
+    assert drained_flag.get("after_step2") is True, (
+        "step-2 gate did not drain the mailbox"
+    )
+    assert events and events[-1] == "done", (
+        f"turn did not complete; events={events}"
+    )
 
 
-def test_gate_drain_computer_use() -> None:
-    pytest.skip("Plan 02 Task 3: control gate drains the mailbox on the computer-use path")
+async def test_gate_drain_claude_code(
+    monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    """CTRL-03: the claude_code path drains a control message between D-15 steps."""
+
+    await _drive_gate_drain_for_backend(monkeypatch, tmp_path, "claude_code")
+
+
+async def test_gate_drain_computer_use(
+    monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    """CTRL-03: the computer_use path drains a control message between D-15 steps."""
+
+    await _drive_gate_drain_for_backend(monkeypatch, tmp_path, "computer_use")

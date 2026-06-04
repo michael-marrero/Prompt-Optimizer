@@ -344,6 +344,17 @@ class ComputerUseAdapter:
                     break
 
                 steps.increment()
+                # Phase 11 (CTRL-03, Seam A): gate-and-drain the per-turn
+                # control mailbox at this D-15 per-loop-iteration step
+                # boundary — the SECOND backend CTRL-03 requires. The adapter
+                # ONLY drains (FIFO, nothing stranded); it NEVER emits a
+                # named SSE event (Pitfall 1 — the awaiting_approval emit is
+                # owned by turn.py's generator). ``control_mailbox`` is None
+                # when no control channel is wired (the no-op consumer drains
+                # and continues to the next step).
+                mailbox = options.control_mailbox
+                if mailbox is not None and mailbox.has_pending():
+                    mailbox.drain_all()
                 tool_uses_this_step: list[dict[str, Any]] = []
 
                 # --- one model call per iteration ---
