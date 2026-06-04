@@ -23,6 +23,11 @@
 //     direct browser→FastAPI request. The network-recording assertion is the
 //     contract; live upstream responses are not required (a 503/empty upstream
 //     still proves the request stayed on the Next origin).
+//   - Phase 11 (Plan 03, CTRL-01/UI-17): ALSO exercise the new control proxy
+//     — issue a browser-context POST /api/control/{turnId} — and assert it
+//     never issues a direct browser→FastAPI request to
+//     POST /api/v1/turns/{turn_id}/control. Same network-recording contract:
+//     a 404/503 upstream still proves the request stayed on the Next origin.
 //
 // The D-18 / D-08 BYOK invariant from CONTEXT: the browser never talks
 // to FastAPI directly. The Next.js route handlers (Plan 03) own the
@@ -202,14 +207,58 @@ test("UI-17: browser never opens connections to FastAPI — only to Next.js orig
     }
   }
 
+  // ===== Phase 11 (11-03 CTRL-01/UI-17): exercise the NEW /control proxy =====
+  //
+  // A control command (approve/pause/interrupt/redirect/take-over) must reach
+  // an in-flight turn via the Next route handler ONLY — the browser must NEVER
+  // POST FastAPI's POST /api/v1/turns/{turn_id}/control directly (UI-17). The
+  // Next proxy (apps/web/app/api/control/[turnId]/route.ts) owns FASTAPI_URL
+  // server-side; this case proves the browser path stays on the Next origin.
+  //
+  // We issue the control POST from the BROWSER context via the in-page
+  // window.fetch (NOT page.request, which is Node-side and not recorded). The
+  // turn_id is the capability the browser learns from the turn_start SSE event;
+  // for the isolation invariant the EXACT id is immaterial — a 404/503/202 all
+  // keep the request on the Next origin, which is the contract (mirrors the
+  // feedback case: live upstream responses are not required). We race the POST
+  // with a waitForResponse on the proxy path so the recorded `page.on("request")`
+  // window DEFINITELY captures the browser→Next request before the assertion.
+  const controlResponse = page
+    .waitForResponse(
+      (resp) => /\/api\/control\/[^/]+$/.test(resp.url()),
+      { timeout: 10_000 },
+    )
+    .catch(() => null);
+  await page.evaluate(async () => {
+    // Browser-context fetch to the Next /control proxy — recorded by
+    // page.on("request"). A non-existent turn_id is fine: the upstream
+    // 404 still proves the request never left the Next origin.
+    await fetch("/api/control/playwright-isolation-probe", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ kind: "pause" }),
+    }).catch(() => {});
+  });
+  const controlResp = await controlResponse;
+  if (controlResp) {
+    // The proxy response MUST be served from the Next origin, never FastAPI.
+    expect(new URL(controlResp.url()).host).toBe(nextOriginHost);
+  } else {
+    // Fallback: still give the fire-and-forget POST a moment to dispatch so
+    // page.on("request") records it before the forbidden-host assertion.
+    await page.waitForTimeout(500);
+  }
+
   // ===== KEY ASSERTION: zero non-origin browser requests =====
   // Covers EVERY Phase-5 endpoint exercised above plus the Phase-4 happy path
   // AND the Phase-8 GET /api/threads/{id}/messages proxy exercised by the
-  // thread-select above:
+  // thread-select above AND the Phase-11 POST /api/control/{turnId} proxy
+  // exercised by the in-page fetch above:
   //   /api/health, /api/settings (GET/PATCH), /api/chat, /api/threads
   //   (list/PATCH/DELETE), /api/threads/{id}/rename, /api/threads/{id}/messages,
-  //   /api/feedback, /api/blobs/{hash}. If any request hit the FastAPI origin
-  //   (8000/8001 or FASTAPI_URL) directly it would appear here and fail the test.
+  //   /api/control/{turnId}, /api/feedback, /api/blobs/{hash}. If any request
+  //   hit the FastAPI origin (8000/8001 or FASTAPI_URL) directly it would
+  //   appear here and fail the test.
   expect(
     offendingRequests,
     `Browser MUST NOT open connections outside ${nextOriginHost} (FastAPI origins ${FASTAPI_HOSTS.join(", ")} are forbidden); saw: ${offendingRequests.join("; ")}`,
