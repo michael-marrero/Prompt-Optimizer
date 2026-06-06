@@ -46,6 +46,23 @@ export const TEXT_DELTA_EVENT_3 =
   'event: text_delta\ndata: {"type":"text_delta","text":"!"}\n\n';
 
 // --------------------------------------------------------------------
+// turn_start / awaiting_approval — Phase 11 (D-05/D-08) named SIBLING events
+// emitted by apps/api/routes/turn.py (NOT members of the frozen ChatChunk
+// union). turn_start is the generator's FIRST yield (carries turn_id so the
+// client can address POST /api/control/{turnId}); awaiting_approval is emitted
+// mid-turn ONLY when a control message is pending. Byte-for-byte mirrors:
+//   - apps/api/routes/turn.py:968 (turn_start emit → {"turn_id": ...})
+//   - apps/api/routes/turn.py:1165 (awaiting_approval emit →
+//     {"turn_id": ..., "correlation_id": <token_urlsafe(12)>})
+// --------------------------------------------------------------------
+
+export const TURN_START_EVENT =
+  'event: turn_start\ndata: {"turn_id":"turn-abc123"}\n\n';
+
+export const AWAITING_APPROVAL_EVENT =
+  'event: awaiting_approval\ndata: {"turn_id":"turn-abc123","correlation_id":"cid-xyz789"}\n\n';
+
+// --------------------------------------------------------------------
 // tool_call / tool_result / file_diff / screenshot
 // (Phase 5 forward-compat — Phase 4 ignores these but the contract must hold.)
 // --------------------------------------------------------------------
