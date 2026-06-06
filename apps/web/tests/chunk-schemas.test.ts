@@ -21,6 +21,7 @@ import {
   StreamErrorCodeSchema,
 } from "@/lib/chunk-schemas";
 import {
+  AWAITING_APPROVAL_EVENT,
   DONE_EVENT,
   DONE_EVENT_EMPTY,
   FILE_DIFF_EVENT,
@@ -33,6 +34,7 @@ import {
   TEXT_DELTA_EVENT,
   TOOL_CALL_EVENT,
   TOOL_RESULT_EVENT,
+  TURN_START_EVENT,
 } from "@/tests/fixtures/sse-events";
 
 // Helper: split a fixture's raw bytes into the `{event, data}` shape the
@@ -154,6 +156,21 @@ describe("Schema contract — NamedSSEEventSchema parses every Phase-3 SSE varia
     if (parsed.event !== "done") throw new Error("narrowing");
     expect(parsed.data.tokens_in).toBeUndefined();
     expect(parsed.data.cost_usd).toBeUndefined();
+  });
+
+  it("parses event:turn_start {turn_id} (Phase 11 D-05 named sibling)", () => {
+    const parsed = NamedSSEEventSchema.parse(parseFixture(TURN_START_EVENT));
+    expect(parsed.event).toBe("turn_start");
+    if (parsed.event !== "turn_start") throw new Error("narrowing");
+    expect(parsed.data.turn_id).toBe("turn-abc123");
+  });
+
+  it("parses event:awaiting_approval {turn_id, correlation_id} (Phase 11 D-08 named sibling)", () => {
+    const parsed = NamedSSEEventSchema.parse(parseFixture(AWAITING_APPROVAL_EVENT));
+    expect(parsed.event).toBe("awaiting_approval");
+    if (parsed.event !== "awaiting_approval") throw new Error("narrowing");
+    expect(parsed.data.turn_id).toBe("turn-abc123");
+    expect(parsed.data.correlation_id).toBe("cid-xyz789");
   });
 });
 

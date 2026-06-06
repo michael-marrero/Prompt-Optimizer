@@ -24,6 +24,7 @@
 import { describe, it, expect } from "vitest";
 import { translateNamedSSEToUIMessageStream } from "@/lib/sse-translate";
 import {
+  AWAITING_APPROVAL_EVENT,
   DONE_EVENT,
   DONE_EVENT_EMPTY,
   FILE_DIFF_EVENT,
@@ -39,6 +40,7 @@ import {
   TEXT_DELTA_EVENT_3,
   TOOL_CALL_EVENT,
   TOOL_RESULT_EVENT,
+  TURN_START_EVENT,
   UNKNOWN_EVENT,
 } from "@/tests/fixtures/sse-events";
 
@@ -319,7 +321,62 @@ describe("D-07 contract — translateNamedSSEToUIMessageStream", () => {
     expect(chunks.some((c) => typeOf(c) === "finish")).toBe(true);
   });
 
-  it("unknown event name (outside the 8-variant union) → error chunk + CONTINUES", async () => {
+  it("turn_start at stream head → start + data-turn_start(turn_id), no error, routing+metrics still land (GAP-1)", async () => {
+    const out = await consumeToText(
+      translateNamedSSEToUIMessageStream(
+        fixtureStream([TURN_START_EVENT, ROUTING_DECISION_EVENT, DONE_EVENT]),
+      ),
+    );
+    const chunks = parseEmittedChunks(out);
+    // No error chunk references turn_start — the parse fix removed the
+    // "Malformed upstream event: turn_start" collapse (GAP-1 closed).
+    const turnStartErrors = chunks.filter(
+      (c) =>
+        typeOf(c) === "error" &&
+        ((c as { errorText?: string }).errorText ?? "").includes("turn_start"),
+    );
+    expect(turnStartErrors.length).toBe(0);
+    // The stream still starts and the turn_id is surfaced as a data part.
+    expect(chunks.some((c) => typeOf(c) === "start")).toBe(true);
+    const turnStartChunk = chunks.find((c) => typeOf(c) === "data-turn_start");
+    expect(turnStartChunk).toBeDefined();
+    expect(dataOf<{ turn_id: string }>(turnStartChunk).turn_id).toBe(
+      "turn-abc123",
+    );
+    // Downstream routing + metrics are unaffected (stream not broken).
+    expect(chunks.some((c) => typeOf(c) === "data-routing")).toBe(true);
+    expect(chunks.some((c) => typeOf(c) === "data-metrics")).toBe(true);
+  });
+
+  it("mid-turn awaiting_approval → data-awaiting_approval, no error, stream continues to done (GAP-1)", async () => {
+    const out = await consumeToText(
+      translateNamedSSEToUIMessageStream(
+        fixtureStream([
+          ROUTING_DECISION_EVENT,
+          AWAITING_APPROVAL_EVENT,
+          DONE_EVENT,
+        ]),
+      ),
+    );
+    const chunks = parseEmittedChunks(out);
+    // No error chunk references awaiting_approval.
+    const approvalErrors = chunks.filter(
+      (c) =>
+        typeOf(c) === "error" &&
+        ((c as { errorText?: string }).errorText ?? "").includes(
+          "awaiting_approval",
+        ),
+    );
+    expect(approvalErrors.length).toBe(0);
+    // The event is consumed as a data part (no-op consumer).
+    expect(chunks.some((c) => typeOf(c) === "data-awaiting_approval")).toBe(
+      true,
+    );
+    // Stream continues to done.
+    expect(chunks.some((c) => typeOf(c) === "data-metrics")).toBe(true);
+  });
+
+  it("unknown event name (outside the 10-variant union) → error chunk + CONTINUES", async () => {
     const out = await consumeToText(
       translateNamedSSEToUIMessageStream(
         fixtureStream([UNKNOWN_EVENT, DONE_EVENT]),
