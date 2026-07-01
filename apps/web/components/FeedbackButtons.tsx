@@ -132,7 +132,9 @@ export function FeedbackButtons({
 
     const row = {
       sentiment,
-      timestamp: new Date().toISOString(),
+      // No client timestamp: the server stamps the authoritative time (D-14,
+      // client clock not trusted) and FeedbackRequest is extra="forbid", so
+      // sending one here is rejected with 422.
       thread_id: threadId ?? "",
       message_id: messageId,
       prompt: prompt ?? fallbackPrompt,
