@@ -32,6 +32,10 @@ def test_manifest_entries_well_formed() -> None:
 def test_all_live_heads_are_required_calibrated() -> None:
     # All three live heads are calibrated today (CalibratedClassifierCV, per
     # src/calibration/tests/test_calibration.py); the contract asserts it.
+    # ponytail: deliberate current invariant (every live head == required-calibrated).
+    # If a live-but-intentionally-uncalibrated head is ever promoted (e.g. tier_router,
+    # Plan 05), loosen this to "every required head is a loaded, calibrated head" in
+    # Story 2.2/2.3 — not now, no such head is on the live path yet.
     assert config.required_calibrated_heads() == sorted(config.DEFAULT_ARTIFACT_PATHS)
 
 
