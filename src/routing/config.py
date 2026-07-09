@@ -137,6 +137,46 @@ DEFAULT_MODEL_MAPPING_PATH: str = os.path.join(CONFIG_DIR, "model_mapping.json")
 
 
 # ----------------------------------------------------------------------
+# Calibration coverage contract (DEF-3 / Story 2.1)
+# ----------------------------------------------------------------------
+
+# Declarative single source of truth for which routing heads MUST be
+# calibrated (vs. may use raw predict_proba) and each head's ECE ceiling.
+# Keys mirror DEFAULT_ARTIFACT_PATHS above — the heads decide.py loads for
+# the live cascade. Story 2.2 enforces this at artifact-load time; Story
+# 2.3 consumes the per-head ece_threshold in the eval gate (replacing the
+# lone global evaluate_routing.ECE_THRESHOLD = 0.10).
+#
+# ece_threshold defaults to 0.10 for every head — the value of today's
+# single global gate — so this declaration changes NO thresholds; it only
+# makes coverage explicit and per-head-tunable later.
+#
+# tier_router and embedding_router are intentionally EXCLUDED: neither is
+# loaded by decide.py (both are experimental / off the live path) and
+# tier_router was deliberately left uncalibrated (Plan 05). If either is
+# ever promoted onto the live path it MUST be added here — the consistency
+# test in tests/test_calibration_coverage.py fails otherwise.
+CALIBRATION_COVERAGE: dict[str, dict[str, object]] = {
+    "task_type_classifier": {"required_calibrated": True, "ece_threshold": 0.10},
+    "agentic_intent_classifier": {"required_calibrated": True, "ece_threshold": 0.10},
+    "model_router": {"required_calibrated": True, "ece_threshold": 0.10},
+}
+
+
+def required_calibrated_heads() -> list[str]:
+    """Return the sorted head names the contract requires to be calibrated.
+
+    Single source of truth for Story 2.2 (load-time enforcement) and Story
+    2.3 (eval gate) — neither should re-hardcode the head list.
+    """
+    return sorted(
+        head
+        for head, record in CALIBRATION_COVERAGE.items()
+        if record["required_calibrated"]
+    )
+
+
+# ----------------------------------------------------------------------
 # Task-type labels that count as "coding/instruction-following" for the
 # D-01 cascade. CONTEXT D-01 spells the second one with a hyphen
 # ("instruction-following") but the existing label_encoder uses the

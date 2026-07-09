@@ -590,6 +590,9 @@ def _synthesize_reroute_decision(
     signals = dict(getattr(original, "signals", None) or {})
     signals.pop("override", None)
     signals["rerouted_from"] = original.backend
+    # DEF-1a: also record the original *model* so the offline dataset can
+    # reconstruct the brain's full pick (backend + model), not just backend.
+    signals["rerouted_from_model"] = original.model_or_agent
 
     return RoutingDecision(
         backend=backend,  # type: ignore[arg-type] — Backend literal
