@@ -230,6 +230,13 @@ def test_low_confidence_rate_in_valid_range(tmp_path: pathlib.Path):
 # ----------------------------------------------------------------------
 
 
+def _all_calibrated() -> dict:
+    """{head: True} for every required head — the compliant coverage input."""
+    from src.routing.config import required_calibrated_heads
+
+    return {head: True for head in required_calibrated_heads()}
+
+
 def test_check_flag_passes_when_thresholds_met():
     """evaluate_check returns (True, []) when all metrics pass."""
     from src.evaluation.evaluate_routing import evaluate_check
@@ -241,6 +248,7 @@ def test_check_flag_passes_when_thresholds_met():
             "agentic_intent_classifier": 0.03,
             "model_router": 0.07,
         },
+        "per_head_calibrated": _all_calibrated(),
         "low_confidence_rate": 0.15,
     }
     passed, failures = evaluate_check(good_metrics)
@@ -259,6 +267,7 @@ def test_check_flag_fails_when_accuracy_below_threshold():
             "agentic_intent_classifier": 0.03,
             "model_router": 0.07,
         },
+        "per_head_calibrated": _all_calibrated(),
         "low_confidence_rate": 0.15,
     }
     passed, failures = evaluate_check(bad_metrics)
@@ -267,21 +276,66 @@ def test_check_flag_fails_when_accuracy_below_threshold():
 
 
 def test_check_flag_fails_when_any_ece_above_threshold():
-    """evaluate_check returns (False, [...]) when any stage ECE > 0.10."""
+    """evaluate_check returns (False, [...]) when a calibrated head's ECE > its threshold."""
     from src.evaluation.evaluate_routing import evaluate_check
 
     bad_metrics = {
         "backend_accuracy": 0.95,
         "per_stage_ece": {
-            "task_type_classifier": 0.42,  # above 0.10 threshold
+            "task_type_classifier": 0.42,  # above the manifest 0.10 threshold
             "agentic_intent_classifier": 0.03,
             "model_router": 0.07,
         },
+        "per_head_calibrated": _all_calibrated(),
         "low_confidence_rate": 0.15,
     }
     passed, failures = evaluate_check(bad_metrics)
     assert passed is False
-    assert any("task_type_classifier" in f for f in failures)
+    assert any("task_type_classifier" in f and "ece" in f for f in failures)
+
+
+def test_check_flag_fails_when_required_head_uncalibrated():
+    """Story 2.3: a required head reported uncalibrated fails, naming the head."""
+    from src.evaluation.evaluate_routing import evaluate_check
+
+    per_head = _all_calibrated()
+    offending = sorted(per_head)[0]
+    per_head[offending] = False
+    metrics = {
+        "backend_accuracy": 0.95,
+        "per_stage_ece": {
+            "task_type_classifier": 0.05,
+            "agentic_intent_classifier": 0.03,
+            "model_router": 0.07,
+        },
+        "per_head_calibrated": per_head,
+        "low_confidence_rate": 0.15,
+    }
+    passed, failures = evaluate_check(metrics)
+    assert passed is False
+    assert any(offending in f and "uncalibrated" in f for f in failures)
+
+
+def test_check_flag_fails_closed_when_calibration_status_missing():
+    """Story 2.3: a required head with no calibration status fails closed (not a silent pass)."""
+    from src.evaluation.evaluate_routing import evaluate_check
+
+    per_head = _all_calibrated()
+    offending = sorted(per_head)[0]
+    del per_head[offending]  # status absent for a required head
+    metrics = {
+        "backend_accuracy": 0.95,
+        "per_stage_ece": {
+            "task_type_classifier": 0.05,
+            "agentic_intent_classifier": 0.03,
+            "model_router": 0.07,
+        },
+        "per_head_calibrated": per_head,
+        "low_confidence_rate": 0.15,
+    }
+    passed, failures = evaluate_check(metrics)
+    assert passed is False
+    assert any(offending in f and "confirm calibration" in f for f in failures)
 
 
 def test_check_flag_behavior():

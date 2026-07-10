@@ -176,6 +176,16 @@ def required_calibrated_heads() -> list[str]:
     )
 
 
+def ece_threshold_for(head: str) -> float:
+    """Return the per-head ECE threshold the contract sets for `head`.
+
+    Companion accessor to `required_calibrated_heads()`; single source of
+    truth for Story 2.3's eval gate so it never re-hardcodes 0.10. Raises
+    KeyError if `head` is not in the manifest (a required head always is).
+    """
+    return float(CALIBRATION_COVERAGE[head]["ece_threshold"])
+
+
 # ----------------------------------------------------------------------
 # Task-type labels that count as "coding/instruction-following" for the
 # D-01 cascade. CONTEXT D-01 spells the second one with a hyphen
