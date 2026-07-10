@@ -45,7 +45,7 @@
 # - Epic 5 is DEFERRED: hold out of the active sprint until Epic 2 completes and Story 5.1 (UX spike) runs.
 
 generated: 2026-07-08
-last_updated: 2026-07-10  # 2-3 done → Epic 2 complete
+last_updated: 2026-07-10  # 3-1 code review complete → done
 project: Prompt-Optimizer
 project_key: NOKEY
 tracking_system: file-system
@@ -67,8 +67,8 @@ development_status:
   epic-2-retrospective: optional
 
   # Epic 3 — Feedback→Retrain Loop (Gated) (DEF-1)
-  epic-3: backlog
-  3-1-assemble-a-retraining-dataset-from-captured-signal: backlog
+  epic-3: in-progress  # first story created 2026-07-10
+  3-1-assemble-a-retraining-dataset-from-captured-signal: done  # code review 2026-07-10: all 4 ACs pass; 3 patches applied, 3 deferred
   3-2-retrain-candidate-heads-into-a-staging-location: backlog
   3-3-gate-promotion-behind-data-volume-regression-calibration: backlog
   epic-3-retrospective: optional
