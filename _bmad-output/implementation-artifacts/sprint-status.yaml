@@ -74,8 +74,8 @@ development_status:
   epic-3-retrospective: optional
 
   # Epic 4 — Task-Label Taxonomy Cleanup (Evidence-Gated) (DEF-2)
-  epic-4: backlog
-  4-1-produce-evidence-the-labels-are-the-weakness: backlog
+  epic-4: in-progress  # first story created 2026-07-13
+  4-1-produce-evidence-the-labels-are-the-weakness: done  # code review 2026-07-13: 8 patches applied (leakage-honesty, feature-col guard, robustness); 28 passed
   4-2-apply-the-merged-taxonomy-and-retrain: backlog
   4-3-validate-the-merge-through-the-gate-before-adoption: backlog
   epic-4-retrospective: optional
