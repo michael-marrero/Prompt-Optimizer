@@ -123,8 +123,14 @@ def create_app() -> FastAPI:
     # byte-serving endpoint, built by 05-02 and mounted here — 05-01
     # owns the single ``include_router`` edit so the two Wave-1/2 plans
     # never both touch ``main.py``, avoiding a double-registration race).
+    # Phase 11 grew this list with ``control`` (POST
+    # /api/v1/turns/{turn_id}/control — the per-turn control channel,
+    # 11-02). Plan 02 owns the SINGLE ``include_router(control.router)``
+    # edit so the two Phase-11 plans never both touch ``main.py``,
+    # avoiding a double-registration race (same precedent as 05-01).
     from apps.api.routes import (
         blobs,
+        control,
         feedback,
         health,
         rename,
@@ -140,6 +146,7 @@ def create_app() -> FastAPI:
     app.include_router(rename.router)
     app.include_router(feedback.router)
     app.include_router(blobs.router)
+    app.include_router(control.router)
 
     return app
 

@@ -96,12 +96,17 @@ from apps.api.backends.chunks import (
     ToolResult,
 )
 from apps.api.backends.computer_use.cost import ComputerUseCostTracker
-from apps.api.backends.computer_use.screen import PlaywrightScreen
+from apps.api.backends.computer_use.screen import (
+    NavigationSchemeError,
+    PlaywrightScreen,
+    _validate_navigation_url,
+)
 from apps.api.backends.computer_use.step_counter import (
     DEFAULT_STEP_CAP,
     StepCounter,
 )
 from apps.api.backends.cost import DEFAULT_PER_TURN_COST_USD
+from apps.api.backends.logging_filter import _redact_text
 from apps.api.backends.pricing import PricingTable
 from apps.api.backends.protocol import AdapterOptions, Message
 
@@ -117,6 +122,12 @@ DEFAULT_MODEL: Final[str] = "claude-opus-4-7"
 # CONTEXT specifics line 262 — D-13 locks 1280×800. At this resolution
 # the computer_20251124 tool is 1:1 pixel-to-coordinate (no scaling).
 DEFAULT_VIEWPORT: Final[tuple[int, int]] = (1280, 800)
+# DEBT-01 (WR-01): ceiling on the agent-supplied ``wait`` duration. The
+# model can request any sleep; without a clamp a confused/adversarial
+# model stalls the whole turn (the per-turn wall-clock is ~600s). 30s is
+# generous for a "let the page settle" wait while keeping a single action
+# from monopolising the budget.
+MAX_WAIT_S: Final[float] = 30.0
 
 
 # Resolve config/pricing.json once at import time.
@@ -259,7 +270,13 @@ class ComputerUseAdapter:
         """
 
         # ----- Stage 1: tracker + step counter + tool spec --------------
-        max_cost_usd = options.max_cost_usd or self._max_cost
+        # DEBT-02: honor an explicit 0.0 as a hard cap (``or`` treats 0.0
+        # as falsy); mirrors the turn.py request->cap ladder (CR-02).
+        max_cost_usd = (
+            options.max_cost_usd
+            if options.max_cost_usd is not None
+            else self._max_cost
+        )
         max_steps = options.max_steps or self._max_steps
         model_id = options.model or DEFAULT_MODEL
         tracker = ComputerUseCostTracker(
@@ -311,14 +328,14 @@ class ComputerUseAdapter:
                 if steps.exceeded():
                     yield StreamError(
                         code="step_cap_exceeded",
-                        message=f"Step cap of {steps.cap} reached.",
+                        message=_redact_text(f"Step cap of {steps.cap} reached."),
                         retriable=False,
                     )
                     break
                 if tracker.over_cap():
                     yield StreamError(
                         code="cost_cap_exceeded",
-                        message=(
+                        message=_redact_text(
                             f"Cost cap ${tracker.max_cost_usd:.6f} exceeded "
                             f"(used ${tracker.total():.6f})."
                         ),
@@ -327,6 +344,17 @@ class ComputerUseAdapter:
                     break
 
                 steps.increment()
+                # Phase 11 (CTRL-03, Seam A): gate-and-drain the per-turn
+                # control mailbox at this D-15 per-loop-iteration step
+                # boundary — the SECOND backend CTRL-03 requires. The adapter
+                # ONLY drains (FIFO, nothing stranded); it NEVER emits a
+                # named SSE event (Pitfall 1 — the awaiting_approval emit is
+                # owned by turn.py's generator). ``control_mailbox`` is None
+                # when no control channel is wired (the no-op consumer drains
+                # and continues to the next step).
+                mailbox = options.control_mailbox
+                if mailbox is not None and mailbox.has_pending():
+                    mailbox.drain_all()
                 tool_uses_this_step: list[dict[str, Any]] = []
 
                 # --- one model call per iteration ---
@@ -425,7 +453,7 @@ class ComputerUseAdapter:
                 if steps.exceeded():
                     yield StreamError(
                         code="step_cap_exceeded",
-                        message=f"Step cap of {steps.cap} reached.",
+                        message=_redact_text(f"Step cap of {steps.cap} reached."),
                         retriable=False,
                     )
                     break
@@ -433,7 +461,7 @@ class ComputerUseAdapter:
                 if tracker.over_cap():
                     yield StreamError(
                         code="cost_cap_exceeded",
-                        message=(
+                        message=_redact_text(
                             f"Cost cap ${tracker.max_cost_usd:.6f} exceeded "
                             f"(used ${tracker.total():.6f})."
                         ),
@@ -454,14 +482,26 @@ class ComputerUseAdapter:
                 tool_results: list[dict[str, Any]] = []
                 for tu in tool_uses_this_step:
                     action = tu["input"].get("action")
-                    (
-                        result_content,
-                        is_error,
-                    ) = await self._execute_action(
-                        screen,
-                        action,
-                        tu["input"],
-                    )
+                    try:
+                        (
+                            result_content,
+                            is_error,
+                        ) = await self._execute_action(
+                            screen,
+                            action,
+                            tu["input"],
+                        )
+                    except NavigationSchemeError as exc:
+                        # DEBT-03: a disallowed URL scheme never reaches
+                        # screen.goto. Emit a validation_error StreamError,
+                        # surface it back to the model as a tool error, and
+                        # let the loop continue so the agent can recover.
+                        yield StreamError(
+                            code="validation_error",
+                            message=_redact_text(str(exc)),
+                            retriable=False,
+                        )
+                        result_content, is_error = str(exc), True
 
                     # ToolResult chunk (action narration).
                     yield ToolResult(
@@ -523,7 +563,7 @@ class ComputerUseAdapter:
             # so the caller's task is marked cancelled.
             yield StreamError(
                 code="cancelled",
-                message="Stream cancelled by caller.",
+                message=_redact_text("Stream cancelled by caller."),
                 retriable=True,
             )
             yield Done(
@@ -540,7 +580,7 @@ class ComputerUseAdapter:
         except AuthenticationError as exc:
             yield StreamError(
                 code="auth_failed",
-                message=str(exc),
+                message=_redact_text(str(exc)),
                 retriable=False,
             )
             yield Done(routing_signals=options.routing_signals)
@@ -548,7 +588,7 @@ class ComputerUseAdapter:
         except APITimeoutError as exc:
             yield StreamError(
                 code="timeout",
-                message=str(exc),
+                message=_redact_text(str(exc)),
                 retriable=True,
             )
             yield Done(routing_signals=options.routing_signals)
@@ -558,7 +598,7 @@ class ComputerUseAdapter:
             code = "rate_limited" if status_code == 429 else "provider_unavailable"
             yield StreamError(
                 code=code,
-                message=str(exc),
+                message=_redact_text(str(exc)),
                 retriable=(code == "rate_limited"),
             )
             yield Done(routing_signals=options.routing_signals)
@@ -567,7 +607,7 @@ class ComputerUseAdapter:
             logger.exception("Computer-use adapter internal error")
             yield StreamError(
                 code="internal_error",
-                message=f"{type(exc).__name__}: {exc}",
+                message=_redact_text(f"{type(exc).__name__}: {exc}"),
                 retriable=False,
             )
             yield Done(routing_signals=options.routing_signals)
@@ -642,12 +682,28 @@ class ComputerUseAdapter:
                 )
             if action == "navigate":
                 url = params.get("url", "") or ""
+                # DEBT-03: reject non-http/https BEFORE goto. Validate here
+                # too (the screen.goto chokepoint also validates) so the
+                # NavigationSchemeError propagates as a validation_error
+                # StreamError rather than a generic tool error.
+                _validate_navigation_url(url)
                 await screen.goto(url)
                 return (f"Navigated to {url}.", False)
             if action == "wait":
-                duration = float(params.get("duration", 1.0) or 1.0)
-                await asyncio.sleep(duration)
+                # DEBT-01: clamp the agent-supplied duration to a ceiling
+                # so a large value cannot stall the turn. The narration
+                # reflects the CLAMPED value, not the requested one.
+                duration = min(
+                    float(params.get("duration", 1.0) or 1.0),
+                    MAX_WAIT_S,
+                )
+                await screen.wait(duration)
                 return (f"Waited {duration}s.", False)
             return (f"Unsupported action: {action}", True)
+        except NavigationSchemeError:
+            # DEBT-03: surface as a validation_error StreamError (not a
+            # tool error). Re-raise so the dispatch loop emits the chunk
+            # and skips the rest of this action.
+            raise
         except Exception as exc:  # noqa: BLE001 — surface as tool error.
             return (f"Error executing {action}: {exc}", True)

@@ -10,7 +10,8 @@ Public surface (CONTEXT canonical refs line 242):
     BLOBS_DIR          Path — content-addressed blob store (STORE-04).
     SETTINGS_PATH      Path — JSON settings file (D-11 non-key fields).
     WORKSPACES_DIR     Path — per-thread Claude Code workspaces.
-    JSONL_LOG_PATH     Path — offline routing-decisions log (STORE-06).
+    JSONL_LOG_PATH     Path — routing-decisions log under ``USER_HOME``
+                       (AD-12); honors ``PROMPT_OPTIMIZER_HOME``.
 
 Every Phase 3 module that needs a filesystem path imports from here.
 The constants are evaluated at module import time so a single
@@ -63,10 +64,15 @@ BLOBS_DIR: Path = USER_HOME / "blobs"
 SETTINGS_PATH: Path = USER_HOME / "settings.json"
 WORKSPACES_DIR: Path = USER_HOME / "workspaces"
 
-# Repo-relative offline-analysis log (STORE-06). Gitignored by
-# ``.gitignore``'s ``.planning/data/`` rule so per-turn routing
-# decisions never enter git history.
-JSONL_LOG_PATH: Path = PROJECT_ROOT / ".planning" / "data" / "routing_decisions.jsonl"
+# Routing-decisions log (STORE-06). Anchored on ``USER_HOME`` (not
+# ``PROJECT_ROOT``) so the ``PROMPT_OPTIMIZER_HOME`` env override
+# redirects it exactly like ``FEEDBACK_LOG_PATH`` and ``DB_PATH``
+# (AD-12: all per-user state lives under ``$PROMPT_OPTIMIZER_HOME``).
+# This is per-user runtime data joined against the feedback log and DB
+# turns for SM-1 / the retrain loop — not a checkout-tied artifact.
+# The ``.planning/data`` subpath is kept so the gitignore rule and the
+# D-14 "sibling of routing_decisions" naming both still read true.
+JSONL_LOG_PATH: Path = USER_HOME / ".planning" / "data" / "routing_decisions.jsonl"
 
 # Routing-feedback log (D-14). The browser cannot write the
 # filesystem, so ``POST /api/v1/feedback`` appends the D-12
@@ -74,12 +80,12 @@ JSONL_LOG_PATH: Path = PROJECT_ROOT / ".planning" / "data" / "routing_decisions.
 #
 # Anchored on ``USER_HOME`` (not ``PROJECT_ROOT``) so the
 # ``PROMPT_OPTIMIZER_HOME`` env override redirects the feedback log the
-# same way it redirects the DB / blobs / settings. ``JSONL_LOG_PATH``
-# is repo-relative because the routing-decisions log is a developer
-# offline-analysis artifact tied to the checkout; the feedback log is
-# per-user runtime data (it travels with the user's home, and tests
-# that set ``PROMPT_OPTIMIZER_HOME`` expect the file under that
-# override — see ``test_feedback.py::test_feedback_home_override_redirects_file``).
+# same way it redirects the DB / blobs / settings. Both this log and
+# ``JSONL_LOG_PATH`` (the routing-decisions log) are home-relative
+# per-user runtime data — they travel with the user's home, and tests
+# that set ``PROMPT_OPTIMIZER_HOME`` expect both files under that
+# override (see ``test_feedback.py::test_feedback_home_override_redirects_file``
+# and ``test_feedback.py::test_decisions_log_home_override_redirects``).
 # A ``.planning/data`` subpath is kept so the gitignore rule and the
 # D-14 "sibling of routing_decisions" naming both still read true.
 FEEDBACK_LOG_PATH: Path = USER_HOME / ".planning" / "data" / "routing_feedback.jsonl"

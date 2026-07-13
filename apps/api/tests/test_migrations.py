@@ -160,13 +160,17 @@ async def test_up_to_latest_idempotent() -> None:
 
     db = await open_db(":memory:")
     try:
+        # ``up_to_latest`` walks to the HIGHEST schema_v*.sql on disk.
+        # Phase 11 added schema_v2.sql, so latest is now 2 (was 1 pre-
+        # Phase 11). The idempotency property under test is unchanged:
+        # the second run is a no-op and the version stays put.
         await up_to_latest(db)
         v1 = await read_schema_version(db)
-        assert v1 == 1, f"first run version {v1}"
+        assert v1 == 2, f"first run version {v1}"
 
         await up_to_latest(db)
         v2 = await read_schema_version(db)
-        assert v2 == 1, f"second run version {v2}"
+        assert v2 == 2, f"second run version {v2}"
 
         async with db.execute("SELECT COUNT(*) FROM schema_meta") as cur:
             count = (await cur.fetchone())[0]
@@ -226,12 +230,16 @@ async def test_v0_to_v1_preserves_data() -> None:
         assert mc == 2, f"expected 2 messages, got {mc}"
         assert rc == 1, f"expected 1 routing_decision, got {rc}"
 
-        # Step 3: advance to v1.
+        # Step 3: advance to the latest on-disk schema.
         await up_to_latest(db)
 
-        # Step 4a: schema_meta.version bumped.
+        # Step 4a: schema_meta.version bumped to the HIGHEST schema_v*.sql
+        # on disk. Phase 11 added schema_v2.sql, so up_to_latest from v0
+        # now lands on 2 (was 1 pre-Phase 11). The substantive STORE-03
+        # assertions below — seeded rows preserved + the schema_v1 index
+        # present — are unchanged.
         v = await read_schema_version(db)
-        assert v == 1, f"expected version 1, got {v}"
+        assert v == 2, f"expected version 2, got {v}"
 
         # Step 4b: seeded rows still present by literal ID.
         async with db.execute(
@@ -269,5 +277,109 @@ async def test_v0_to_v1_preserves_data() -> None:
             "idx_messages_thread_id_created_at missing — schema_v1 "
             "didn't apply"
         )
+    finally:
+        await db.close()
+
+
+# --------------------------------------------------------------------
+# Test 5: v1 -> v2 adds control_events on top of schema_v1 (CTRL-02 /
+# D-02). Mirrors test_v0_to_v1_preserves_data: apply v0+v1, seed prior
+# rows, run up_to_latest, assert version==2, the table + index appear in
+# sqlite_master, and the seeded schema_v1 rows survived.
+# --------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_v1_to_v2_creates_control_events() -> None:
+    """CTRL-02 / D-02 round-trip:
+
+    1. Manually apply schema_v0.sql + schema_v1.sql only — DB is at v1.
+    2. Ingest fixtures/schema_v0_seed.sql — 1 thread, 2 messages, 1
+       routing_decisions row (the "prior rows" that must survive).
+    3. Run up_to_latest(db) — advances v1 -> v2.
+    4. Assert: schema_meta.version == 2; control_events table AND
+       idx_control_events_turn_id index both in sqlite_master; every
+       seeded prior row still present (proves "on top of schema_v1")."""
+
+    from apps.api.db.migrate import up_to_latest
+    from apps.api.db.queries import read_schema_version
+
+    schema_v1_path = os.path.join(
+        REPO_ROOT, "apps", "api", "db", "migrations", "schema_v1.sql"
+    )
+
+    db = await aiosqlite.connect(":memory:")
+    try:
+        await db.execute("PRAGMA foreign_keys=ON")
+
+        # Step 1: apply schema_v0 + schema_v1 only (NOT schema_v2). After
+        # these two scripts the DB is structurally at v1, but schema_meta
+        # still reads 0 because schema_v0 seeds 0 and the runner has not
+        # bumped it. Stamp it to 1 so up_to_latest only applies v2.
+        with open(SCHEMA_V0_PATH, "r", encoding="utf-8") as fh:
+            await db.executescript(fh.read())
+        with open(schema_v1_path, "r", encoding="utf-8") as fh:
+            await db.executescript(fh.read())
+        await db.execute("UPDATE schema_meta SET version = 1")
+        await db.commit()
+
+        # Step 2: ingest the Wave 0 seed — these are the prior rows that
+        # MUST survive the v1 -> v2 migration.
+        with open(SEED_SQL_PATH, "r", encoding="utf-8") as fh:
+            await db.executescript(fh.read())
+
+        async with db.execute("SELECT COUNT(*) FROM threads") as cur:
+            tc = (await cur.fetchone())[0]
+        async with db.execute("SELECT COUNT(*) FROM messages") as cur:
+            mc = (await cur.fetchone())[0]
+        assert tc == 1, f"expected 1 thread pre-migration, got {tc}"
+        assert mc == 2, f"expected 2 messages pre-migration, got {mc}"
+
+        # Step 3: advance v1 -> v2.
+        await up_to_latest(db)
+
+        # Step 4a: schema_meta.version bumped to 2.
+        v = await read_schema_version(db)
+        assert v == 2, f"expected version 2, got {v}"
+
+        # Step 4b: control_events table landed.
+        async with db.execute(
+            "SELECT name FROM sqlite_master"
+            " WHERE type='table' AND name=?",
+            ("control_events",),
+        ) as cur:
+            tbl_row = await cur.fetchone()
+        assert tbl_row is not None, (
+            "control_events table missing — schema_v2 didn't apply"
+        )
+
+        # Step 4c: idx_control_events_turn_id index landed.
+        async with db.execute(
+            "SELECT name FROM sqlite_master"
+            " WHERE type='index' AND name=?",
+            ("idx_control_events_turn_id",),
+        ) as cur:
+            ix_row = await cur.fetchone()
+        assert ix_row is not None, (
+            "idx_control_events_turn_id missing — schema_v2 didn't apply"
+        )
+
+        # Step 4d: seeded prior rows survived (proves "on top of v1").
+        async with db.execute(
+            "SELECT id FROM threads WHERE id = ?", ("thr_seed_0001",)
+        ) as cur:
+            thr_row = await cur.fetchone()
+        assert thr_row is not None, "thr_seed_0001 lost during v1->v2 migration"
+
+        async with db.execute(
+            "SELECT id FROM messages WHERE thread_id = ?"
+            " ORDER BY created_at ASC",
+            ("thr_seed_0001",),
+        ) as cur:
+            msg_ids = [row[0] async for row in cur]
+        assert msg_ids == [
+            "msg_seed_user_0001",
+            "msg_seed_asst_0001",
+        ], f"messages lost / reordered during v1->v2: {msg_ids}"
     finally:
         await db.close()

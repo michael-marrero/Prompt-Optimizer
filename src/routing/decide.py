@@ -52,6 +52,7 @@ import joblib
 import pandas as pd
 from scipy.sparse import csr_matrix, hstack
 
+from src.calibration.coverage import enforce_calibration_coverage
 from src.feature_extraction.text_inputs import build_router_text_input_single
 from src.routing.config import (
     CONFIG_DIR,
@@ -167,12 +168,19 @@ def _load_default_artifacts() -> dict:
     with open(DEFAULT_MODEL_MAPPING_PATH, "r", encoding="utf-8") as fh:
         model_mapping = json.load(fh)
 
-    return {
+    loaded = {
         "task_type_classifier": task_artifacts,
         "agentic_intent_classifier": agentic_artifacts,
         "model_router": router_artifacts,
         "model_mapping": model_mapping,
     }
+
+    # Story 2.2: fail closed if a required-calibrated head (per the 2.1
+    # manifest) loaded uncalibrated. Load-time only — decide() reaches this
+    # path solely when artifacts is None, so preloaded per-turn calls never
+    # re-run it (AD-3). A raise here aborts uvicorn startup by design.
+    enforce_calibration_coverage(loaded)
+    return loaded
 
 
 # ----------------------------------------------------------------------

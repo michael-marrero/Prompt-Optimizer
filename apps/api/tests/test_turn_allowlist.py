@@ -253,3 +253,168 @@ async def test_computer_use_unreachable_on_auto_turn_without_strict_and(
     assert row["backend"] == "openrouter", (
         f"D-06: expected reroute to openrouter floor, got {row['backend']}"
     )
+
+
+# ---------------------------------------------------------------------------
+# Story 1.1 (DEF-1a) — guard the ``rerouted_from`` breadcrumb.
+#
+# The reroute at ``turn.py::_synthesize_reroute_decision`` already preserves the
+# brain's original pick in ``signals`` so the offline retrain dataset (Epic 3)
+# can reconstruct the route the brain WANTED, not just the one dispatched. These
+# tests lock that behavior in both sinks (JSONL + DB) so it cannot silently
+# regress — without them, deleting the breadcrumb line keeps every test above
+# green.
+# ---------------------------------------------------------------------------
+
+
+async def _read_db_signals() -> dict:
+    """Return the parsed ``signals`` JSON of the latest routing_decisions row.
+
+    Reads the module-global ``apps.api.paths.DB_PATH`` (repointed under the
+    per-test tmp home by ``_fresh_app``), so no path argument is needed.
+    """
+
+    import sqlite3
+
+    import apps.api.paths
+
+    con = sqlite3.connect(str(apps.api.paths.DB_PATH))
+    try:
+        cur = con.execute(
+            "SELECT signals FROM routing_decisions ORDER BY rowid DESC LIMIT 1"
+        )
+        found = cur.fetchone()
+    finally:
+        con.close()
+    assert found is not None, "no routing_decisions row was persisted"
+    return json.loads(found[0])
+
+
+async def test_reroute_preserves_original_pick_in_signals(
+    monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    """DEF-1a: an allowlist reroute must preserve the brain's original pick —
+    ``rerouted_from`` (backend) + ``rerouted_from_model`` (model) plus the
+    original per-stage telemetry — in BOTH the JSONL sink and the DB signals
+    column, and must NOT set ``override`` (a reroute is a neutral auto-route,
+    D-07)."""
+
+    app = _fresh_app(monkeypatch, tmp_path)
+    # Original brain pick: claude_code backend with a DISTINCT model, so the
+    # guard proves rerouted_from (backend) and rerouted_from_model (model) are
+    # captured SEPARATELY — a copy-paste regression to original.backend fails.
+    # Seed ``override`` so the ``"override" not in signals`` assertions below
+    # actually exercise the ``signals.pop("override")`` strip in
+    # _synthesize_reroute_decision (D-07) — without it those asserts are vacuous.
+    from src.routing.schema import RoutingDecision
+
+    def _fake_decide(*args, **kwargs):
+        return RoutingDecision(
+            backend="claude_code",
+            model_or_agent="anthropic/claude-sonnet-4-5",
+            rationale="auto-routed pick",
+            confidence=0.9,
+            signals={"task_type": "coding", "override": True},
+        )
+
+    monkeypatch.setattr("apps.api.routes.turn.decide", _fake_decide)
+    app.state.adapters = _fake_adapters()
+    app.state.settings = {
+        "default_max_cost_usd": 0.50,
+        "backends_enabled": {
+            "openrouter": True,
+            "claude_code": False,  # brain's pick is disabled → reroute fires
+            "computer_use": False,
+        },
+        "computer_use_opt_in": False,
+    }
+
+    async with app.router.lifespan_context(app):
+        async with httpx.AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test"
+        ) as client:
+            thread_id = await _create_thread(client)
+            async with client.stream(
+                "POST",
+                f"/api/v1/threads/{thread_id}/turn",
+                json={"message": "build me a finance app"},
+            ) as resp:
+                assert resp.status_code == 200, resp.text
+                async for line in resp.aiter_lines():
+                    if line.startswith("event: done"):
+                        break
+
+        jsonl_record = await _read_jsonl_backend(tmp_path)
+        db_signals = await _read_db_signals()
+
+    # Sanity: the reroute actually happened (dispatched = enabled floor).
+    assert jsonl_record["backend"] == "openrouter"
+
+    # AC #2 — the offline JSONL sink carries the original pick.
+    jsonl_signals = jsonl_record["signals"]
+    assert jsonl_signals.get("rerouted_from") == "claude_code", (
+        f"DEF-1a BREACH: original backend not recoverable from JSONL: {jsonl_signals!r}"
+    )
+    assert jsonl_signals.get("rerouted_from_model") == "anthropic/claude-sonnet-4-5", (
+        f"DEF-1a BREACH: original model not recoverable from JSONL: {jsonl_signals!r}"
+    )
+    assert jsonl_signals.get("task_type") == "coding", (
+        "DEF-1a BREACH: original per-stage telemetry lost on reroute"
+    )
+    assert "override" not in jsonl_signals, "D-07 BREACH: reroute mislabeled as override"
+
+    # AC #1 — the DB signals column carries the same breadcrumb (mirror the
+    # full JSONL assertion set: backend, distinct model, telemetry, no override).
+    assert db_signals.get("rerouted_from") == "claude_code", (
+        f"DEF-1a BREACH: original backend not recoverable from DB: {db_signals!r}"
+    )
+    assert db_signals.get("rerouted_from_model") == "anthropic/claude-sonnet-4-5", (
+        f"DEF-1a BREACH: original model not recoverable from DB: {db_signals!r}"
+    )
+    assert db_signals.get("task_type") == "coding", (
+        "DEF-1a BREACH: original per-stage telemetry lost from DB signals"
+    )
+    assert "override" not in db_signals, "D-07 BREACH: reroute mislabeled as override in DB"
+
+
+async def test_no_reroute_leaves_no_breadcrumb(
+    monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    """AC #3: when the brain's pick IS enabled (no reroute), no ``rerouted_from``
+    breadcrumb is added — the breadcrumb marks an actual reroute only."""
+
+    app = _fresh_app(monkeypatch, tmp_path)
+    _pin_decide(monkeypatch, "openrouter")  # enabled → no reroute
+    app.state.adapters = _fake_adapters()
+    app.state.settings = {
+        "default_max_cost_usd": 0.50,
+        "backends_enabled": {
+            "openrouter": True,
+            "claude_code": True,
+            "computer_use": False,
+        },
+        "computer_use_opt_in": False,
+    }
+
+    async with app.router.lifespan_context(app):
+        async with httpx.AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test"
+        ) as client:
+            thread_id = await _create_thread(client)
+            async with client.stream(
+                "POST",
+                f"/api/v1/threads/{thread_id}/turn",
+                json={"message": "tell me a joke"},
+            ) as resp:
+                assert resp.status_code == 200, resp.text
+                async for line in resp.aiter_lines():
+                    if line.startswith("event: done"):
+                        break
+
+        jsonl_record = await _read_jsonl_backend(tmp_path)
+
+    assert jsonl_record["backend"] == "openrouter"
+    assert "rerouted_from" not in jsonl_record["signals"], (
+        "false breadcrumb: rerouted_from present on a non-reroute turn"
+    )
+    assert "rerouted_from_model" not in jsonl_record["signals"]

@@ -38,6 +38,11 @@ dev = [
     "httpx-sse>=0.4,<1.0",
 ]
 keyring = ["keyring>=24,<26"]
+# EVAL-01 / EVAL-04 — local key-free inspect-ai harness lives under eval/.
+# inspect-ai is the UK AISI Inspect framework (github.com/UKGovernmentBEIS/inspect_ai);
+# provenance human-verified before this entry landed (threat T-10-SC).
+# pydantic is NOT re-pinned here — it is already a core dependency (line 17).
+eval = ["inspect-ai>=0.3.224,<0.4"]
 
 [project.scripts]
 route-decide = "src.routing.decide:main"
@@ -50,7 +55,7 @@ build-backend = "hatchling.build"
 packages = ["src", "apps"]
 
 [tool.pytest.ini_options]
-testpaths = ["src", "apps"]
+testpaths = ["src", "apps", "eval"]
 python_files = ["test_*.py"]
 # importlib mode keeps each src/<package>/tests/ directory in its own
 # import namespace; otherwise the duplicate bare "tests" package names

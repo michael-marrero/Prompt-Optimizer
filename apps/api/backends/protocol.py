@@ -60,6 +60,31 @@ class AdapterOptions:
     caps inside each adapter package. ``None`` here means "use the
     default" — the adapter's ``stream`` is responsible for picking the
     fallback.
+
+    ``wall_clock_s`` / ``usd_backstop`` (Phase 9, RELI-02) are the
+    per-backend kill-switch ceilings enforced by the ``turn.py``
+    orchestration loop, NOT by the adapters. They are SEPARATE, higher
+    ceilings than ``max_cost_usd`` — ``usd_backstop`` is the turn-level
+    runaway-spend backstop that surfaces ``budget_exceeded`` (D-05),
+    distinct from the adapter's own ``cost_cap_exceeded`` accounting.
+    The dataclass-level defaults here are the chat-tier D-04 starting
+    values (120s / $0.50); ``turn.py``'s per-backend resolver overrides
+    them from env (agents default 600s / $2.00). They carry defaults so
+    the frozen dataclass stays constructible with no args.
+
+    ``cancel_budget_s`` (Phase 9, RELI-03 / D-06, Open Question 2) is
+    the per-backend cancellation budget: the maximum time the upstream
+    adapter's ``CancelledError`` teardown (OpenRouter ``in_flight.close()``;
+    Claude Code ``client.interrupt()`` + ``disconnect()`` + rmtree;
+    computer-use Playwright ``screen.aclose()``) is allowed to run after
+    a client disconnect before ``turn.py`` stops waiting and lets the
+    re-raise propagate. It is PER-BACKEND because chat teardown is a
+    single socket close (~2s, the BACKEND-07 / API-06 budget) while
+    agent teardown drives a subprocess interrupt or a Playwright page
+    close that legitimately needs a few seconds — a flat 2s ceiling
+    would truncate slow agent teardown. The chat-tier default below is
+    2.0s; ``turn.py``'s resolver raises it to 5.0s for the agent
+    backends (and reads per-backend env knobs).
     """
 
     model: str | None = None
@@ -67,6 +92,21 @@ class AdapterOptions:
     max_steps: int | None = None
     cwd: str | None = None
     routing_signals: dict[str, Any] | None = None
+    # RELI-02 per-backend kill-switch ceilings (resolved per turn in
+    # turn.py from env knobs; D-04 chat-tier defaults below).
+    wall_clock_s: float = 120.0
+    usd_backstop: float = 0.50
+    # RELI-03 / D-06 (Open Question 2) per-backend cancellation budget —
+    # the teardown window honored on a client disconnect (resolved per
+    # turn in turn.py; chat-tier 2.0s default below, agents 5.0s).
+    cancel_budget_s: float = 2.0
+    # Phase 11 (CTRL-03): the per-turn ``ControlMailbox`` threaded into
+    # the agent backends so each adapter can gate-and-drain at its D-15
+    # step boundary. Additive-with-default (``None`` = no control channel,
+    # e.g. the openrouter chat path which is never gated). Typed ``Any``
+    # to avoid importing ``apps.api.control`` here (keeps protocol.py
+    # import-light); adapters duck-type ``.has_pending`` / ``.drain_all``.
+    control_mailbox: Any = None
 
 
 class BackendAdapter(Protocol):

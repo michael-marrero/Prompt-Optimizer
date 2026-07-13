@@ -87,6 +87,12 @@ def test_paths_constants_well_formed() -> None:
     assert BLOBS_DIR.parent == USER_HOME
     assert SETTINGS_PATH.parent == USER_HOME
     assert WORKSPACES_DIR.parent == USER_HOME
+    # JSONL_LOG_PATH (routing-decisions log) is anchored on USER_HOME too
+    # (AD-12), co-located with the DB / feedback log under a single
+    # ``PROMPT_OPTIMIZER_HOME`` root. The subpath is
+    # ``<USER_HOME>/.planning/data/routing_decisions.jsonl`` so the home
+    # root is parents[2].
+    assert JSONL_LOG_PATH.parents[2] == USER_HOME
 
 
 def test_paths_honors_env_override(monkeypatch: pytest.MonkeyPatch) -> None:

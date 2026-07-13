@@ -57,9 +57,17 @@ class FakeStreamingAdapter(BackendAdapter):
         chunks: list[ChatChunk],
         *,
         sleep_per_chunk: float = 0.0,
+        step_boundaries: int = 0,
     ) -> None:
         self._chunks = chunks
         self._sleep_per_chunk = sleep_per_chunk
+        # Phase 11 (CTRL-03): how many of the leading chunks are treated as
+        # D-15 "step" boundaries — BEFORE yielding each such chunk the fake
+        # runs the SAME gate-and-drain the real claude_code / computer_use
+        # adapters run after ``steps.increment()`` (drain only, NEVER yield a
+        # ServerSentEvent). Set ``step_boundaries=N`` to exercise an
+        # inter-step control gate without a live SDK client.
+        self._step_boundaries = step_boundaries
 
     async def stream(
         self,
@@ -69,13 +77,22 @@ class FakeStreamingAdapter(BackendAdapter):
     ) -> AsyncIterator[ChatChunk]:
         """Yield each pre-built chunk in order.
 
-        The ``prompt`` / ``history`` / ``options`` arguments are
-        accepted to honor the ``BackendAdapter`` Protocol but are
-        ignored by the fake — tests assert on the produced chunk
-        stream, not on the adapter's prompt-handling.
+        The ``prompt`` / ``history`` arguments are accepted to honor the
+        ``BackendAdapter`` Protocol but are ignored — tests assert on the
+        produced chunk stream. ``options.control_mailbox`` IS honored when
+        ``step_boundaries > 0``: the fake gate-and-drains at each of the
+        first ``step_boundaries`` chunks, mirroring the agent adapters'
+        D-15 boundary (CTRL-03) so the inter-step gate can be unit-tested
+        without a live claude_code / computer_use SDK client.
         """
 
-        for chunk in self._chunks:
+        for index, chunk in enumerate(self._chunks):
             if self._sleep_per_chunk > 0:
                 await asyncio.sleep(self._sleep_per_chunk)
+            # D-15 step boundary: drain the control mailbox BEFORE yielding
+            # this step's chunk (the adapter drains, it NEVER emits SSE).
+            if index < self._step_boundaries:
+                mailbox = options.control_mailbox
+                if mailbox is not None and mailbox.has_pending():
+                    mailbox.drain_all()
             yield chunk

@@ -39,7 +39,9 @@ Cross-refs:
 
 from __future__ import annotations
 
+import asyncio
 from typing import Optional
+from urllib.parse import urlparse
 
 from playwright.async_api import (
     Browser,
@@ -48,6 +50,40 @@ from playwright.async_api import (
     Playwright,
     async_playwright,
 )
+
+
+# DEBT-03 (WR-09): only http/https may cross into the browser. ``file://``,
+# ``chrome://``, ``data:`` and every other scheme are local-file / internal
+# exfil surfaces once the agent is opted in, so they are rejected at the
+# single navigation chokepoint (``PlaywrightScreen.goto``). Do NOT widen this
+# set beyond http/https (V5/V12 input validation — RESEARCH DEBT-03).
+_ALLOWED_SCHEMES: frozenset[str] = frozenset({"http", "https"})
+
+
+class NavigationSchemeError(ValueError):
+    """Raised by ``PlaywrightScreen.goto`` for a disallowed URL scheme.
+
+    A ``ValueError`` subclass so existing ``except Exception`` callers
+    still surface it as a tool error, while the adapter's navigate branch
+    can catch it specifically and emit a ``validation_error`` StreamError
+    (DEBT-03) BEFORE any navigation reaches Chromium.
+    """
+
+
+def _validate_navigation_url(url: str) -> str:
+    """Return ``url`` unchanged iff its scheme is http/https.
+
+    The single navigation chokepoint (RESEARCH Code Examples — DEBT-03):
+    applied inside ``goto`` so every caller is covered, regardless of how
+    the URL was constructed. Raises ``NavigationSchemeError`` otherwise.
+    """
+
+    scheme = urlparse(url).scheme.lower()
+    if scheme not in _ALLOWED_SCHEMES:
+        raise NavigationSchemeError(
+            f"Navigation scheme '{scheme}' is not allowed (http/https only)."
+        )
+    return url
 
 
 class PlaywrightScreen:
@@ -179,10 +215,27 @@ class PlaywrightScreen:
             await self._page.mouse.wheel(-delta, 0)
 
     async def goto(self, url: str) -> None:
-        """Navigate the page to ``url``."""
+        """Navigate the page to ``url`` after a scheme allowlist check.
+
+        DEBT-03: ``_validate_navigation_url`` rejects any non-http/https
+        scheme (``file://``, ``chrome://``, ``data:`` …) BEFORE the URL
+        reaches Playwright — the single chokepoint that covers every
+        caller.
+        """
 
         assert self._page is not None, "goto called before start()"
+        _validate_navigation_url(url)
         await self._page.goto(url)
+
+    async def wait(self, duration: float) -> None:
+        """Sleep ``duration`` seconds (the ``wait`` action chokepoint).
+
+        DEBT-01: the adapter clamps ``duration`` to ``MAX_WAIT_S`` before
+        calling this, so the screen never sleeps for an agent-controlled
+        unbounded interval.
+        """
+
+        await asyncio.sleep(duration)
 
     async def aclose(self) -> None:
         """Close the browser and stop Playwright.

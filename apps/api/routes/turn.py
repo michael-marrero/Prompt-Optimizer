@@ -134,6 +134,8 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
+import random
 import secrets
 from typing import Any, Literal
 
@@ -148,7 +150,9 @@ from apps.api.backends.chunks import (
     StreamError,
 )
 from apps.api.backends.cost import DEFAULT_PER_TURN_COST_USD
+from apps.api.backends.logging_filter import _redact_text
 from apps.api.backends.protocol import AdapterOptions
+from apps.api.control.mailbox import ControlMailbox
 from apps.api.backends.protocol import Message as AdapterMessage
 from apps.api.blobs import _maybe_externalize_screenshot
 from apps.api.db.queries import (
@@ -214,6 +218,216 @@ _OVERRIDE_DEFAULTS: dict[str, str] = {
     "claude_code": "claude-agent-sdk",
     "computer_use": "computer-use-2025-11-24",
 }
+
+
+# --------------------------------------------------------------------
+# RELI-01 retry-loop constants (D-02) + RELI-02 per-backend ceilings (D-04)
+# --------------------------------------------------------------------
+
+
+# D-02: up to 3 total attempts (2 retries), base 0.5s, cap 8s, full
+# jitter. Worst-case ~10-15s before a graceful terminal error keeps
+# interactive chat responsive. Implemented with stdlib ``random`` —
+# no library (RESEARCH State of the Art: full-jitter is
+# random.uniform(0, min(cap, base*2**attempt))).
+RETRY_BASE_S: float = 0.5
+RETRY_CAP_S: float = 8.0
+RETRY_MAX_ATTEMPTS: int = 3
+
+
+# Per-backend wall-clock + USD kill-switch ceilings (RELI-02, D-04).
+# Starting defaults: OpenRouter chat is short-lived (120s / $0.50);
+# Claude Code + computer-use agents run longer multi-step workflows
+# (600s / $2.00). The ``usd_backstop`` is a SEPARATE, higher ceiling
+# than the per-turn ``max_cost_usd`` cost cap — it is the runaway-spend
+# backstop that surfaces ``budget_exceeded`` (D-05), NOT
+# ``cost_cap_exceeded``. Each is overridable from env per A5/D-04.
+_BACKEND_CEILING_DEFAULTS: dict[str, tuple[float, float]] = {
+    # backend: (wall_clock_s, usd_backstop)
+    "openrouter": (120.0, 0.50),
+    "claude_code": (600.0, 2.00),
+    "computer_use": (600.0, 2.00),
+}
+
+# Env knob names per backend (planner's discretion per D-04/A5). Absent
+# env var → the D-04 starting default; present env var → its value.
+_BACKEND_CEILING_ENV: dict[str, tuple[str, str]] = {
+    # backend: (wall_clock_env, usd_env)
+    "openrouter": ("RELI_OPENROUTER_WALL_S", "RELI_OPENROUTER_USD"),
+    "claude_code": ("RELI_CLAUDE_CODE_WALL_S", "RELI_CLAUDE_CODE_USD"),
+    "computer_use": ("RELI_COMPUTER_USE_WALL_S", "RELI_COMPUTER_USE_USD"),
+}
+
+
+# RELI-03 / D-06 (Open Question 2): per-backend CANCELLATION budget — the
+# teardown window honored on a client disconnect. Chat is a single socket
+# close (~2s, the BACKEND-07 / API-06 budget); the agent backends drive a
+# subprocess interrupt (Claude Code) or a Playwright page close
+# (computer-use) that legitimately needs a few seconds, so a flat 2s
+# ceiling would TRUNCATE slow agent teardown. Distinct from the wall-clock
+# kill-switch above (which bounds the live turn, not the teardown).
+_BACKEND_CANCEL_BUDGET_DEFAULTS: dict[str, float] = {
+    "openrouter": 2.0,
+    "claude_code": 5.0,
+    "computer_use": 5.0,
+}
+
+# Env knob names per backend for the cancel budget (mirrors the ceiling
+# resolver convention). Absent → the default above; present → its value.
+_BACKEND_CANCEL_BUDGET_ENV: dict[str, str] = {
+    "openrouter": "RELI_OPENROUTER_CANCEL_S",
+    "claude_code": "RELI_CLAUDE_CODE_CANCEL_S",
+    "computer_use": "RELI_COMPUTER_USE_CANCEL_S",
+}
+
+
+def _resolve_env_float(name: str, default: float) -> float:
+    """Return ``float(os.environ[name])`` or ``default`` when unset/invalid.
+
+    A malformed env value (non-numeric) falls back to the D-04 default
+    rather than crashing the turn — the ceiling is a safety backstop, so
+    a typo in a knob must never take the kill-switch offline.
+    """
+
+    raw = os.environ.get(name)
+    if raw is None or raw == "":
+        return default
+    try:
+        return float(raw)
+    except ValueError:
+        logger.warning(
+            "ignoring non-numeric %s=%r — using default %s",
+            name,
+            raw,
+            default,
+        )
+        return default
+
+
+def _resolve_backend_ceilings(backend: str) -> tuple[float, float]:
+    """Resolve ``(wall_clock_s, usd_backstop)`` for ``backend`` (RELI-02).
+
+    Reads the per-backend env knobs (``RELI_<BACKEND>_WALL_S`` /
+    ``RELI_<BACKEND>_USD``); each falls back to the D-04 starting default
+    (``_BACKEND_CEILING_DEFAULTS``) when its env var is unset. An unknown
+    backend (unreachable in normal flow — the Backend literal constrains
+    the value) falls back to the conservative chat-tier defaults.
+    """
+
+    wall_default, usd_default = _BACKEND_CEILING_DEFAULTS.get(
+        backend, (120.0, 0.50)
+    )
+    wall_env, usd_env = _BACKEND_CEILING_ENV.get(
+        backend, ("RELI_OPENROUTER_WALL_S", "RELI_OPENROUTER_USD")
+    )
+    wall_clock_s = _resolve_env_float(wall_env, wall_default)
+    usd_backstop = _resolve_env_float(usd_env, usd_default)
+    return wall_clock_s, usd_backstop
+
+
+def _resolve_cancel_budget(backend: str) -> float:
+    """Resolve the per-backend cancellation budget (RELI-03 / D-06, OQ2).
+
+    Reads the per-backend env knob (``RELI_<BACKEND>_CANCEL_S``); falls
+    back to ``_BACKEND_CANCEL_BUDGET_DEFAULTS`` when unset (chat 2.0s,
+    agents 5.0s). An unknown backend (unreachable — the Backend literal
+    constrains the value) falls back to the conservative chat budget so a
+    teardown can never block the re-raise indefinitely.
+
+    This is the window ``turn.py`` waits for the upstream adapter's
+    CancelledError teardown (socket close / subprocess interrupt /
+    Playwright page close) before letting the re-raise propagate — slow
+    agent teardown gets its full budget; a hung teardown cannot wedge the
+    cancellation past it.
+    """
+
+    default = _BACKEND_CANCEL_BUDGET_DEFAULTS.get(backend, 2.0)
+    env_name = _BACKEND_CANCEL_BUDGET_ENV.get(
+        backend, "RELI_OPENROUTER_CANCEL_S"
+    )
+    return _resolve_env_float(env_name, default)
+
+
+# --------------------------------------------------------------------
+# RELI-02 kill-switch terminal-pair emitters (SECURE-07 redacted)
+# --------------------------------------------------------------------
+
+
+def _kill_switch_pair(
+    buffer: list[ChatChunk],
+    decision: RoutingDecision,
+    *,
+    code: str,
+    message: str,
+) -> list[ServerSentEvent]:
+    """Build + buffer a redacted ``StreamError(code) + Done`` terminal pair.
+
+    Shared by the wall-clock and USD kill-switches. ``message`` is ALWAYS
+    routed through ``_redact_text`` (SECURE-07) so no kill-switch reason
+    can carry an unredacted secret across the SSE boundary. Both chunks
+    are appended to ``buffer`` (so ``persist_turn`` records the terminal
+    Done + the error status) and returned as the two SSE events the
+    caller must yield, in order.
+    """
+
+    err = StreamError(
+        code=code,  # type: ignore[arg-type] — closed D-05 vocabulary
+        message=_redact_text(message),
+        retriable=False,
+    )
+    buffer.append(err)
+    done = Done(routing_signals=decision.signals)
+    buffer.append(done)
+    return [
+        ServerSentEvent(event=err.type, data=err.model_dump_json()),
+        ServerSentEvent(event=done.type, data=done.model_dump_json()),
+    ]
+
+
+def _wall_clock_kill(
+    buffer: list[ChatChunk],
+    decision: RoutingDecision,
+    options: AdapterOptions,
+) -> list[ServerSentEvent]:
+    """Terminal pair for a wall-clock deadline trip (RELI-02, D-05).
+
+    ``code="wall_clock_exceeded"`` is DISTINCT from the provider-level
+    ``timeout`` (D-05 anti-pattern: do not reuse ``timeout`` for the
+    wall-clock kill). The reason is plain-English and redacted.
+    """
+
+    return _kill_switch_pair(
+        buffer,
+        decision,
+        code="wall_clock_exceeded",
+        message=(
+            f"Stopped — this turn hit its {int(options.wall_clock_s)}s limit."
+        ),
+    )
+
+
+def _budget_kill(
+    buffer: list[ChatChunk],
+    decision: RoutingDecision,
+    options: AdapterOptions,
+) -> list[ServerSentEvent]:
+    """Terminal pair for a USD backstop trip (RELI-02, D-05).
+
+    ``code="budget_exceeded"`` is DISTINCT from the adapter-level
+    ``cost_cap_exceeded`` — this is the turn-level runaway-spend
+    kill-switch sitting above the per-turn cost cap. The reason is
+    plain-English and redacted.
+    """
+
+    return _kill_switch_pair(
+        buffer,
+        decision,
+        code="budget_exceeded",
+        message=(
+            "Stopped — this turn reached its "
+            "${:.2f} budget.".format(options.usd_backstop)
+        ),
+    )
 
 
 def _synthesize_override_decision(
@@ -376,6 +590,9 @@ def _synthesize_reroute_decision(
     signals = dict(getattr(original, "signals", None) or {})
     signals.pop("override", None)
     signals["rerouted_from"] = original.backend
+    # DEF-1a: also record the original *model* so the offline dataset can
+    # reconstruct the brain's full pick (backend + model), not just backend.
+    signals["rerouted_from_model"] = original.model_or_agent
 
     return RoutingDecision(
         backend=backend,  # type: ignore[arg-type] — Backend literal
@@ -559,6 +776,18 @@ async def post_turn(
 
     turn_id = secrets.token_urlsafe(12)
 
+    # Phase 11 (CTRL-01, D-05/RELI-03): mint + register the per-turn
+    # ControlMailbox BEFORE the streaming generator runs so a concurrent
+    # ``POST /turns/{turn_id}/control`` can find a live mailbox by
+    # ``turn_id`` (registry.get → 202) the moment this turn is addressable.
+    # Registered here (route scope) so it is guaranteed present before the
+    # event_stream generator's ``try``; the generator's ``finally``
+    # deregisters it on EVERY exit (happy / cancelled / kill / error) so
+    # the registry never leaks a dead turn (RELI-03 — a post-finish control
+    # POST then 404s). ``app.state.control_registry`` is seeded in lifespan.
+    mailbox = ControlMailbox()
+    app.state.control_registry[turn_id] = mailbox
+
     # D-19 INFO log #1 — turn_start. user_msg_len bounds the log
     # surface (the message body itself is never logged so the
     # RedactionFilter never sees prompt content).
@@ -666,6 +895,19 @@ async def post_turn(
     else:
         max_cost_usd = DEFAULT_PER_TURN_COST_USD
 
+    # RELI-02: resolve the per-backend wall-clock + USD kill-switch
+    # ceilings from env (D-04 defaults when unset). These are SEPARATE,
+    # higher ceilings than ``max_cost_usd`` — the turn-level runaway
+    # backstop that surfaces wall_clock_exceeded / budget_exceeded, NOT
+    # the adapter's own cost_cap_exceeded.
+    wall_clock_s, usd_backstop = _resolve_backend_ceilings(decision.backend)
+
+    # RELI-03 / D-06 (Open Question 2): resolve the per-backend
+    # cancellation budget — chat ~2s, agents ~5s — so slow agent teardown
+    # (subprocess interrupt / Playwright close) is not truncated by the
+    # chat-tier 2s ceiling on a client disconnect.
+    cancel_budget_s = _resolve_cancel_budget(decision.backend)
+
     options = AdapterOptions(
         model=decision.model_or_agent,
         max_cost_usd=max_cost_usd,
@@ -677,6 +919,18 @@ async def post_turn(
         # Phase 2 default tmpdir is fine for v1.
         cwd=None,
         routing_signals=decision.signals,
+        wall_clock_s=wall_clock_s,
+        usd_backstop=usd_backstop,
+        cancel_budget_s=cancel_budget_s,
+        # Phase 11 (CTRL-03): thread the per-turn mailbox into the AGENT
+        # backends only so each adapter can gate-and-drain at its D-15 step
+        # boundary. ``None`` for openrouter — the single-round-trip chat
+        # path is never gated (no inter-step boundary to gate at).
+        control_mailbox=(
+            mailbox
+            if decision.backend in ("claude_code", "computer_use")
+            else None
+        ),
     )
 
     # ----------------------------------------------------------------
@@ -705,6 +959,20 @@ async def post_turn(
         # test_turn_streaming.py::test_routing_decision_event...).
         # Yield happens BEFORE the try/except so a cancellation between
         # adapter creation and adapter.stream() still ships the chip data.
+        #
+        # Phase 11 (D-05): emit the ``turn_start`` named SSE event as the
+        # generator's VERY FIRST yield — it carries the ``turn_id`` so the
+        # client knows the capability to address a later control POST at
+        # ``POST /turns/{turn_id}/control``. It is a named SIBLING event
+        # (Seam A): the frozen 7-variant ChatChunk union is NOT extended,
+        # so the chunks.py contract + the Zod port stay byte-for-byte
+        # unchanged. Emitted before routing_decision so turn_id is on the
+        # wire first.
+        yield ServerSentEvent(
+            event="turn_start",
+            data=json.dumps({"turn_id": turn_id}),
+        )
+
         payload = {
             "backend": decision.backend,
             "model_or_agent": decision.model_or_agent,
@@ -719,45 +987,236 @@ async def post_turn(
 
         buffer: list[ChatChunk] = []
         start_t = asyncio.get_event_loop().time()
+        # RELI-01 (D-01/D-02/D-03): pre-first-token retry loop. ``attempt``
+        # counts establishment tries; ``first_chunk_seen`` is the D-01 gate
+        # — once any non-terminal chunk has reached the wire, a later drop
+        # is TERMINAL (no retry: retrying would replay already-streamed
+        # tokens / re-run side-effecting agent steps; RESEARCH Pitfall 6).
+        # The adapters SWALLOW provider errors and yield a terminal
+        # ``StreamError + Done`` themselves, so the retry decision inspects
+        # the buffered StreamError's ``retriable`` flag (the inherited
+        # classification — D-03; no new code→bool table here) BEFORE
+        # forwarding it. A retriable pre-first-token StreamError is
+        # swallowed (along with the failed attempt's trailing Done) and the
+        # stream is re-established after a full-jitter backoff.
+        attempt = 0
+        first_chunk_seen = False
+        # RELI-03 / D-06 (Open Question 2): the live adapter generator, so
+        # the cancellation handler can drive + BOUND its teardown
+        # (in_flight.close / interrupt / aclose) by the per-backend
+        # ``cancel_budget_s``. Hoisted out of the inner loop so the
+        # ``except asyncio.CancelledError`` block can reach the active one.
+        active_stream_iter: Any = None
         try:
-            async for chunk in adapter.stream(
-                body.message, adapter_history, options
-            ):
-                # STORE-04 + D-14: externalize Screenshot chunks
-                # >=256KB BEFORE buffer.append AND BEFORE the SSE yield
-                # so both the wire and the persisted content_blocks
-                # JSON see the image_ref shape. <256KB chunks pass
-                # through unchanged (return-unchanged from the
-                # transcoder). The interception lives here — the
-                # SSE generator is the only callsite per RESEARCH
-                # Pattern 10 lines 635-637.
-                if isinstance(chunk, Screenshot):
-                    chunk = _maybe_externalize_screenshot(chunk)
-                buffer.append(chunk)
-                yield ServerSentEvent(
-                    event=chunk.type,
-                    data=chunk.model_dump_json(),
-                )
-                if isinstance(chunk, Done):
-                    # D-04 terminal-Done invariant — break so the
-                    # finally block fires persist_turn.
+            while True:
+                # ``retrying`` marks that THIS attempt already hit a
+                # retriable pre-first-token StreamError; its trailing Done
+                # (the adapter's terminal pair) must be swallowed too,
+                # never forwarded as a successful completion.
+                retrying = False
+                # RELI-02 kill-switch terminates the WHOLE turn (not just
+                # this attempt); ``killed`` propagates the break past the
+                # retry loop.
+                killed = False
+                # Manual iteration (not ``async for``) so each pull can be
+                # bounded by ``asyncio.wait_for`` — a provider that hangs
+                # BEFORE yielding any chunk (Pitfall 4) must still trip the
+                # wall-clock deadline. ``asyncio.timeout()`` is 3.11+; the
+                # per-pull ``wait_for`` is the 3.10-safe equivalent
+                # (RESEARCH State of the Art).
+                stream_iter = adapter.stream(
+                    body.message, adapter_history, options
+                ).__aiter__()
+                active_stream_iter = stream_iter
+                while True:
+                    # Remaining wall-clock budget bounds this pull. A
+                    # non-positive remainder means the deadline already
+                    # passed → trip immediately rather than waiting.
+                    remaining = (
+                        options.wall_clock_s
+                        - (asyncio.get_event_loop().time() - start_t)
+                    )
+                    if remaining <= 0:
+                        for ev in _wall_clock_kill(
+                            buffer, decision, options
+                        ):
+                            yield ev
+                        killed = True
+                        break
+                    try:
+                        chunk = await asyncio.wait_for(
+                            stream_iter.__anext__(), timeout=remaining
+                        )
+                    except StopAsyncIteration:
+                        # Generator exhausted naturally — leave the inner
+                        # loop (retry/terminal decision below).
+                        break
+                    except asyncio.TimeoutError:
+                        # Pitfall 4: a pull that out-ran the deadline (e.g.
+                        # a hang before the first chunk) is a wall-clock
+                        # trip, NOT the provider ``timeout`` code (D-05).
+                        for ev in _wall_clock_kill(
+                            buffer, decision, options
+                        ):
+                            yield ev
+                        killed = True
+                        break
+
+                    # RELI-01 retry gate: a StreamError seen BEFORE the
+                    # first real chunk is an establishment failure. If it
+                    # is retriable and we have attempts left, DON'T forward
+                    # it — swallow it, back off (full jitter), and
+                    # re-establish. (D-01: only applies while
+                    # ``not first_chunk_seen``.)
+                    if (
+                        isinstance(chunk, StreamError)
+                        and not first_chunk_seen
+                        and chunk.retriable
+                        and attempt + 1 < RETRY_MAX_ATTEMPTS
+                    ):
+                        # Full jitter (D-02): sleep in
+                        # [0, min(cap, base * 2**attempt)).
+                        backoff = min(
+                            RETRY_CAP_S, RETRY_BASE_S * (2 ** attempt)
+                        )
+                        await asyncio.sleep(random.uniform(0, backoff))
+                        attempt += 1
+                        retrying = True
+                        # Swallow this attempt's terminal pair: skip the
+                        # rest of THIS generator (its trailing Done lands
+                        # next and is dropped by the guard below) and
+                        # re-enter the while loop for a fresh attempt.
+                        continue
+                    # While retrying, drop the failed attempt's trailing
+                    # Done so it is never persisted as a success. This only
+                    # fires for a Done arriving with NO intervening real
+                    # chunk (the adapter's terminal pair after a swallowed
+                    # StreamError). The moment a real chunk is forwarded
+                    # below, ``retrying`` is cleared so the NEXT Done is the
+                    # genuine terminal one.
+                    if retrying and isinstance(chunk, Done):
+                        continue
+
+                    # RELI-02 wall-clock kill-switch (per-chunk monotonic
+                    # check). Catches a stream that produces MANY fast
+                    # chunks past the deadline (the per-pull wait_for above
+                    # only bounds an inter-chunk hang). The code is DISTINCT
+                    # from the provider ``timeout`` (D-05 anti-pattern: do
+                    # NOT reuse ``timeout`` for the wall-clock kill).
+                    elapsed = asyncio.get_event_loop().time() - start_t
+                    if elapsed > options.wall_clock_s:
+                        for ev in _wall_clock_kill(buffer, decision, options):
+                            yield ev
+                        killed = True
+                        break
+
+                    # RELI-02 USD kill-switch (D-05). A SEPARATE, higher
+                    # ceiling than the adapter's own ``cost_cap_exceeded``
+                    # accounting: when the cumulative provider-reported
+                    # spend for this turn crosses ``usd_backstop``, emit
+                    # ``budget_exceeded`` (NOT ``cost_cap_exceeded``). The
+                    # adapters report authoritative cost on the terminal
+                    # Done (and may report running cost on chunks); read it
+                    # off the chunk and compare to the backstop, mirroring
+                    # CostTracker.over_cap()'s ``total() > ceiling`` predicate.
+                    chunk_cost = getattr(chunk, "cost_usd", None)
+                    if (
+                        chunk_cost is not None
+                        and chunk_cost > options.usd_backstop
+                    ):
+                        for ev in _budget_kill(buffer, decision, options):
+                            yield ev
+                        killed = True
+                        break
+
+                    # STORE-04 + D-14: externalize Screenshot chunks
+                    # >=256KB BEFORE buffer.append AND BEFORE the SSE yield
+                    # so both the wire and the persisted content_blocks
+                    # JSON see the image_ref shape. <256KB chunks pass
+                    # through unchanged (return-unchanged from the
+                    # transcoder). The interception lives here — the
+                    # SSE generator is the only callsite per RESEARCH
+                    # Pattern 10 lines 635-637.
+                    if isinstance(chunk, Screenshot):
+                        chunk = _maybe_externalize_screenshot(chunk)
+                    # D-01: the first FORWARDED chunk flips the gate. A
+                    # terminal StreamError forwarded here (non-retriable,
+                    # or attempts exhausted, or post-first-token) does not
+                    # need the gate, but setting it is harmless and keeps
+                    # the invariant simple: past the first yield, no retry.
+                    first_chunk_seen = True
+                    # A real chunk reached the wire — this attempt is the
+                    # winning one; the next Done is the genuine terminal.
+                    retrying = False
+                    buffer.append(chunk)
+                    yield ServerSentEvent(
+                        event=chunk.type,
+                        data=chunk.model_dump_json(),
+                    )
+                    # Phase 11 Seam A (D-03/D-06/D-08): if a control message
+                    # is pending in this turn's mailbox, emit the
+                    # ``awaiting_approval`` named SSE event (D-08 — emit ONLY
+                    # when a message is pending) then drain the mailbox so
+                    # the no-op consumer continues. This is the Seam-A owner:
+                    # the SSE event is emitted ONLY here by the generator, a
+                    # named SIBLING of the frozen ChatChunk union (the
+                    # adapters NEVER yield ServerSentEvent — Pitfall 1). The
+                    # body fields beyond turn_id+correlation_id are
+                    # discretionary (the contract test freezes only the
+                    # ChatChunk union, not this event's shape).
+                    if mailbox.has_pending():
+                        yield ServerSentEvent(
+                            event="awaiting_approval",
+                            data=json.dumps(
+                                {
+                                    "turn_id": turn_id,
+                                    "correlation_id": secrets.token_urlsafe(
+                                        12
+                                    ),
+                                }
+                            ),
+                        )
+                        mailbox.drain_all()
+                    if isinstance(chunk, Done):
+                        # D-04 terminal-Done invariant — break so the
+                        # finally block fires persist_turn.
+                        break
+                    # Defense-in-depth proactive disconnect check.
+                    # sse-starlette's own ``_listen_for_disconnect``
+                    # handles the real-network case. Under ASGITransport
+                    # both polls are no-ops per RESEARCH Pitfall 6;
+                    # tests use ``task.cancel()`` to trigger cleanup.
+                    if await request.is_disconnected():
+                        break
+
+                # Inner stream ended. A kill-switch trip (wall-clock / USD)
+                # terminated the whole turn — never retry it. Otherwise, if
+                # this attempt was abandoned for a retry (retriable
+                # pre-first-token failure), re-establish; else the stream
+                # completed (or was forwarded terminal) — leave the loop.
+                if killed:
                     break
-                # Defense-in-depth proactive disconnect check.
-                # sse-starlette's own ``_listen_for_disconnect``
-                # handles the real-network case. Under ASGITransport
-                # both polls are no-ops per RESEARCH Pitfall 6;
-                # tests use ``task.cancel()`` to trigger cleanup.
-                if await request.is_disconnected():
-                    break
+                if retrying and not first_chunk_seen:
+                    continue
+                break
         except asyncio.CancelledError:
             # Pattern 7 + PEP 789: emit terminal pair into the buffer
             # AND the wire so the client + persistence both see the
             # cancellation, THEN re-raise so the upstream adapter's
-            # CancelledError handler closes the provider connection
-            # within the 2-second BACKEND-07 / API-06 budget.
+            # CancelledError handler closes the provider connection.
+            #
+            # D-06 keep-partial: the buffer already carries every chunk
+            # forwarded before the cancel (the partial ``text_delta``s),
+            # so appending the terminal pair here means the ``finally``
+            # block's ``persist_turn`` writes the PARTIAL content_blocks
+            # with status='cancelled' — the stopped turn survives reload.
             err = StreamError(
                 code="cancelled",
-                message="Stream cancelled by caller.",
+                # SECURE-07 uniformity: every StreamError.message
+                # constructed in turn.py routes through _redact_text, even
+                # this static string, so no construction site can ever
+                # carry an unredacted secret.
+                message=_redact_text("Stream cancelled by caller."),
                 retriable=True,
             )
             buffer.append(err)
@@ -767,8 +1226,50 @@ async def post_turn(
             yield ServerSentEvent(
                 event=done.type, data=done.model_dump_json()
             )
+            # RELI-03 / D-06 (Open Question 2): drive the upstream adapter's
+            # CancelledError teardown (OpenRouter in_flight.close / Claude
+            # Code interrupt+disconnect / computer-use Playwright aclose)
+            # and BOUND it by the PER-BACKEND ``cancel_budget_s`` — chat
+            # ~2s, agents ~5s. ``aclose()`` throws GeneratorExit into the
+            # adapter generator, running its teardown; ``shield`` lets that
+            # teardown finish even though THIS task is being cancelled,
+            # while ``wait_for`` caps the wait so a hung teardown can never
+            # block the re-raise past the budget (slow agent teardown gets
+            # its full window; it is NOT truncated to the 2s chat ceiling).
+            if active_stream_iter is not None:
+                aclose = getattr(active_stream_iter, "aclose", None)
+                if aclose is not None:
+                    try:
+                        await asyncio.wait_for(
+                            asyncio.shield(aclose()),
+                            timeout=options.cancel_budget_s,
+                        )
+                    except (asyncio.TimeoutError, asyncio.CancelledError):
+                        # Budget exhausted (or this task re-cancelled mid
+                        # teardown): stop waiting and let the re-raise
+                        # propagate. The shielded aclose keeps running to
+                        # completion in the background so the provider
+                        # connection still closes — we simply do not block
+                        # the cancellation past the budget.
+                        pass
+                    except Exception:
+                        # A teardown that raises (e.g. closing an already
+                        # closed subprocess) must never mask the
+                        # cancellation; swallow and re-raise below.
+                        pass
             raise
         finally:
+            # Phase 11 (RELI-03, T-11-08): deregister the per-turn mailbox
+            # on EVERY exit — happy path, client cancel, wall-clock / USD
+            # kill, or any error. This runs FIRST in the finally (before
+            # persist_turn) so the registry never leaks a dead turn even if
+            # persistence raises. A control POST after this point 404s
+            # (registry.get → None), proving the turn is no longer
+            # addressable (test_mailbox_deregistered_on_cancel). ``pop(...,
+            # None)`` is idempotent — safe even if the turn was never fully
+            # registered.
+            app.state.control_registry.pop(turn_id, None)
+
             # STORE-05 + D-04: ONE BEGIN/COMMIT on Done.
             #
             # The Phase 2 D-04 terminal-Done invariant guarantees the
@@ -1059,7 +1560,10 @@ async def post_compare(
             # the provider connection within the cancellation budget.
             err = StreamError(
                 code="cancelled",
-                message="Compare lane cancelled by caller.",
+                # SECURE-07 uniformity: redact every turn.py StreamError
+                # message at construction, even static ones, so no site
+                # can ever carry an unredacted secret.
+                message=_redact_text("Compare lane cancelled by caller."),
                 retriable=True,
             )
             await queue.put(
@@ -1086,7 +1590,8 @@ async def post_compare(
             )
             err = StreamError(
                 code="internal_error",
-                message="Compare lane failed.",
+                # SECURE-07 uniformity (see lane-cancel site above).
+                message=_redact_text("Compare lane failed."),
                 retriable=True,
             )
             await queue.put(

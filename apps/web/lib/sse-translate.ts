@@ -20,6 +20,11 @@
 //     accumulates until the next `\n\n` boundary).
 //
 // Translation mapping (04-RESEARCH.md lines 498-506):
+//   turn_start (Phase 11 D-05)       → start (if first) + data-turn_start
+//                                       (carries turn_id so Phase 12 can target
+//                                       POST /api/control/{turnId})
+//   awaiting_approval (Phase 11 D-08)→ start (if first) + data-awaiting_approval
+//                                       (consume-without-break no-op consumer)
 //   routing_decision (any position) → start (first event only) + data-routing
 //   text_delta (first)              → start (if first) + text-start + text-delta
 //   text_delta (Nth)                → text-delta (reuses id:"t-0")
@@ -133,6 +138,28 @@ export function translateNamedSSEToUIMessageStream(
 
             // Translate to AI SDK v6 chunks per the mapping table.
             switch (parsed.event) {
+              case "turn_start": {
+                // Phase 11 (D-05): surface { turn_id } to the client as a data
+                // part so Phase 12 can target POST /api/control/{turnId}.
+                // assistant-ui ignores unrecognised data-* types so no renderer
+                // is needed for this backend-only phase. turn_start is the
+                // generator's FIRST yield, so this typically opens the message.
+                ensureMessageStarted(controller);
+                controller.enqueue(
+                  emit({ type: "data-turn_start", data: parsed.data }),
+                );
+                break;
+              }
+              case "awaiting_approval": {
+                // Phase 11 (D-08): consume-without-break. Emit a
+                // data-awaiting_approval part and CONTINUE — this is a no-op
+                // consumer for the backend-only phase; the stream is not broken.
+                ensureMessageStarted(controller);
+                controller.enqueue(
+                  emit({ type: "data-awaiting_approval", data: parsed.data }),
+                );
+                break;
+              }
               case "routing_decision": {
                 ensureMessageStarted(controller);
                 // The data field carries the STRUCTURED 5-key routing record
@@ -204,6 +231,20 @@ export function translateNamedSSEToUIMessageStream(
                     },
                   }),
                 );
+                // DEBT-04: surface the server-assigned assistant_message_id (new
+                // optional Done field, Plan 01) as a data part so FeedbackButtons
+                // joins live-turn feedback to the persisted message row by the
+                // SERVER id, not the runtime message.id. Emitted ONLY when present
+                // so the existing Done chunk-count contract is unchanged for the
+                // (legacy) Done-without-id fixtures.
+                if (parsed.data.assistant_message_id) {
+                  controller.enqueue(
+                    emit({
+                      type: "data-assistant_message_id",
+                      data: parsed.data.assistant_message_id,
+                    }),
+                  );
+                }
                 controller.enqueue(emit({ type: "finish" }));
                 // Literal AI SDK v6 terminator sentinel.
                 controller.enqueue(encoder.encode("data: [DONE]\n\n"));

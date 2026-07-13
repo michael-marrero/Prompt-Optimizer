@@ -37,8 +37,42 @@ import { ArrowLeft } from "lucide-react";
 import { toast } from "sonner";
 import { KeyForm } from "@/components/KeyForm";
 import { Switch } from "@/components/ui/switch";
+import mapping from "@/lib/model-mapping.json";
 
 type BackendKey = "openrouter" | "claude_code" | "computer_use";
+
+// DEBT-05 IN-02 — the routable OpenRouter models the per-model allowlist covers
+// (same source the Routing Preferences modal uses). Only verified OpenRouter
+// slugs with an api_model are user-toggleable.
+type MappingEntry = {
+  display_name?: string;
+  provider?: string;
+  api_model?: string | null;
+};
+const ROUTABLE_MODELS = Object.entries(
+  mapping as Record<string, MappingEntry>,
+)
+  .filter(([, e]) => e.provider === "openrouter" && e.api_model)
+  .map(([slug, e]) => ({ slug, label: e.display_name ?? slug }));
+
+// DEBT-05 IN-02 — persisted allowlist store key. localStorage gives a
+// remount-stable read-back before the 09-05 backend read-back endpoint lands;
+// an absent slug means allowed (default all-on).
+const ALLOWLIST_KEY = "po:model-allowlist";
+
+function loadAllowlist(): Record<string, boolean> {
+  try {
+    const raw = localStorage.getItem(ALLOWLIST_KEY);
+    if (raw === null) return {};
+    const parsed = JSON.parse(raw) as unknown;
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      return parsed as Record<string, boolean>;
+    }
+  } catch {
+    /* no localStorage / malformed — default all-on */
+  }
+  return {};
+}
 
 interface MaskedKey {
   present: boolean;
@@ -98,6 +132,15 @@ async function patchSettings(body: Record<string, unknown>): Promise<void> {
 
 export default function SettingsPage(): React.JSX.Element {
   const [state, setState] = useState<SettingsState>(DEFAULT_STATE);
+  // DEBT-05 IN-02 — per-model allowlist. Seeded from localStorage so a toggle
+  // SURVIVES a remount (read back, not reset to the local default).
+  const [allowlist, setAllowlist] = useState<Record<string, boolean>>({});
+
+  // Read back the persisted allowlist on mount (lazy initialiser would run
+  // during SSR where localStorage is undefined, so do it in an effect).
+  useEffect(() => {
+    setAllowlist(loadAllowlist());
+  }, []);
 
   // Load the masked settings on mount.
   useEffect(() => {
@@ -162,6 +205,35 @@ export default function SettingsPage(): React.JSX.Element {
       }
     },
     [state.computer_use_opt_in],
+  );
+
+  // DEBT-05 IN-02 + WR-06 — persist a per-model allowlist toggle. Optimistically
+  // flip + write localStorage (so it survives a remount), PATCH the server, and
+  // on a failed PATCH REVERT the value (state + localStorage) and toast — the
+  // same toast+revert contract the backend toggles above use (T-09-10).
+  const toggleModelAllowed = useCallback(
+    async (slug: string, next: boolean) => {
+      const previous = allowlist;
+      const nextAllowlist = { ...previous, [slug]: next };
+      setAllowlist(nextAllowlist);
+      try {
+        localStorage.setItem(ALLOWLIST_KEY, JSON.stringify(nextAllowlist));
+      } catch {
+        /* no localStorage — the server PATCH is still the source of truth */
+      }
+      try {
+        await patchSettings({ model_allowlist: nextAllowlist });
+      } catch {
+        setAllowlist(previous);
+        try {
+          localStorage.setItem(ALLOWLIST_KEY, JSON.stringify(previous));
+        } catch {
+          /* ignore */
+        }
+        toast.error("Couldn't update allowed models — is the local API running?");
+      }
+    },
+    [allowlist],
   );
 
   const envEnabled = state.computer_use_env_enabled === true;
@@ -240,6 +312,38 @@ export default function SettingsPage(): React.JSX.Element {
                     checked={checked}
                     disabled={floorLocked}
                     onCheckedChange={(next) => void toggleBackend(key, next)}
+                  />
+                </div>
+              );
+            })}
+          </div>
+        </section>
+
+        {/* DEBT-05 IN-02 — Allowed models (per-model routing allowlist that
+            persists across a remount + surfaces PATCH failures). */}
+        <section>
+          <h2 className="text-lg font-semibold text-slate-900 mb-4">
+            Allowed models
+          </h2>
+          <div>
+            {ROUTABLE_MODELS.map(({ slug, label }) => {
+              // Absent slug ⇒ allowed (default all-on).
+              const checked = allowlist[slug] ?? true;
+              return (
+                <div
+                  key={slug}
+                  className="flex items-center justify-between py-3 border-b border-slate-200"
+                >
+                  <div className="pr-4">
+                    <p className="text-sm text-slate-900">{label}</p>
+                    <p className="text-sm text-slate-700">OpenRouter</p>
+                  </div>
+                  <Switch
+                    aria-label={`Allow ${label} for routing`}
+                    checked={checked}
+                    onCheckedChange={(next) =>
+                      void toggleModelAllowed(slug, next)
+                    }
                   />
                 </div>
               );

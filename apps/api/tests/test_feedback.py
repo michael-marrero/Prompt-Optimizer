@@ -178,6 +178,38 @@ async def test_feedback_home_override_redirects_file(
     assert path.exists()
 
 
+def test_decisions_log_home_override_redirects(
+    monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    """PROMPT_OPTIMIZER_HOME redirects JSONL_LOG_PATH under tmp_path (AD-12).
+
+    The routing-decisions log is written by the turn path (not POST
+    /feedback), so this test asserts the constant directly after a
+    reload rather than driving a route. It mirrors
+    ``test_feedback_home_override_redirects_file`` for the feedback log:
+    a single ``PROMPT_OPTIMIZER_HOME`` value must co-locate the decisions
+    log, the feedback log, and the DB under one root.
+    """
+
+    monkeypatch.setenv("PROMPT_OPTIMIZER_HOME", str(tmp_path))
+    import apps.api.paths
+
+    importlib.reload(apps.api.paths)
+    try:
+        assert str(tmp_path) in str(apps.api.paths.JSONL_LOG_PATH), (
+            "JSONL_LOG_PATH did not honor PROMPT_OPTIMIZER_HOME: "
+            f"{apps.api.paths.JSONL_LOG_PATH}"
+        )
+        # Decisions log and feedback log share the same override root.
+        assert str(tmp_path) in str(apps.api.paths.FEEDBACK_LOG_PATH)
+        assert apps.api.paths.JSONL_LOG_PATH.parents[2] == apps.api.paths.USER_HOME
+    finally:
+        # Cleanup: drop the override and reload so later tests see the
+        # default (mirror test_smoke.py::test_paths_honors_env_override).
+        monkeypatch.delenv("PROMPT_OPTIMIZER_HOME", raising=False)
+        importlib.reload(apps.api.paths)
+
+
 async def test_feedback_no_key_shape_in_written_file(
     monkeypatch: pytest.MonkeyPatch, tmp_path
 ) -> None:

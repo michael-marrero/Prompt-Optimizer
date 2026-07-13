@@ -870,7 +870,8 @@ async def test_routing_decision_event_arrives_first_and_matches_done(
     (the persistence-source guarantee) requires.
 
     Four independent assertions:
-      (a) first event on the wire is ``routing_decision``
+      (a) ``routing_decision`` precedes any chunk (after the Phase 11
+          ``turn_start`` envelope event that now leads the stream)
       (b) it arrives within 500ms (ASGITransport latency bound — the
           100ms target is for real-network; ASGITransport has no
           network)
@@ -968,12 +969,33 @@ async def test_routing_decision_event_arrives_first_and_matches_done(
                             # Pitfall 4 finite consume.
                             break
 
-    # ---- Assertion (a): first event is routing_decision ----
+    # ---- Assertion (a): routing_decision precedes any chunk ----
+    # Phase 11 (D-05) prepends a ``turn_start`` envelope event carrying
+    # the turn_id (the control-POST capability) as the generator's VERY
+    # first yield. ``routing_decision`` remains the first event AFTER that
+    # envelope and still arrives BEFORE any text_delta / other chunk — the
+    # genuine D-15 contract (chip data before chunks). The turn_start
+    # envelope is a named sibling lifecycle event, NOT a ChatChunk, so the
+    # frozen union is untouched.
     assert len(events) > 0, "expected at least one SSE event"
-    assert events[0][0] == "routing_decision", (
-        f"first event was {events[0][0]!r}, expected "
-        f"'routing_decision' — D-15 amendment requires the chip data "
-        f"to arrive on the wire BEFORE any text_delta or other chunk"
+    assert events[0][0] == "turn_start", (
+        f"first event was {events[0][0]!r}, expected 'turn_start' — "
+        f"Phase 11 D-05 turn_start envelope leads the stream"
+    )
+    event_names = [e[0] for e in events]
+    rd_idx = event_names.index("routing_decision")
+    first_chunk_idx = next(
+        (
+            i
+            for i, name in enumerate(event_names)
+            if name not in ("turn_start", "routing_decision")
+        ),
+        len(event_names),
+    )
+    assert rd_idx < first_chunk_idx, (
+        f"routing_decision (idx {rd_idx}) must arrive BEFORE any "
+        f"text_delta / other chunk (first chunk idx {first_chunk_idx}) — "
+        f"D-15 chip-before-chunks contract; got {event_names}"
     )
 
     # ---- Assertion (b): arrived within 500ms ----
@@ -986,7 +1008,7 @@ async def test_routing_decision_event_arrives_first_and_matches_done(
     )
 
     # ---- Assertion (c): 5-key structured payload ----
-    routing_payload = json.loads(events[0][1])
+    routing_payload = json.loads(events[rd_idx][1])
     assert set(routing_payload.keys()) == {
         "backend",
         "model_or_agent",
@@ -1102,3 +1124,555 @@ async def test_missing_anthropic_key_returns_400_not_500(
         f"error detail should name the missing env var so the user "
         f"knows what to set; got {detail!r}"
     )
+
+
+# =====================================================================
+# Phase 9 Wave-0 RED test slices — RELI-01 (retry) + RELI-02 (kill-switch)
+# =====================================================================
+#
+# These four tests are scaffolded RED for Phase 9 (VALIDATION.md
+# Per-Requirement map rows RELI-01/RELI-02). They assert the TARGET
+# behavior the engineering waves (Plans 02-03) will land, and are each
+# gated with an imperative ``pytest.xfail(...)`` so they:
+#   - are COLLECTABLE by their VALIDATION.md ``-k`` selector
+#     (retry / first_token_no_retry / wall_clock / budget_exceeded), and
+#   - report ``xfail`` (NOT error, NOT pass) against today's unmodified
+#     turn handler.
+# When the retry loop / kill-switch lands, the owning plan removes the
+# ``pytest.xfail(...)`` guard line and the assertions below run for real
+# (Phase-1 D named-body RED convention; NOT module-level skip).
+
+
+async def test_retry_retriable_establishment_error(
+    monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    """RELI-01 (-k retry): a retriable establishment error retries
+    (≤3, full-jitter) then succeeds; the turn streams a normal Done.
+
+    Target behavior (Plan 02-03): when the adapter's FIRST round-trip
+    raises a retriable error (e.g. provider_unavailable) BEFORE any
+    chunk is yielded, the turn handler retries with full-jitter backoff
+    up to 3 attempts. A raise-then-succeed fake therefore still produces
+    a text_delta + done stream. ``max_retries=0`` is forced for the
+    non-retriable path (covered by the sibling slice).
+    """
+
+    app = _fresh_app(monkeypatch, tmp_path)
+
+    from apps.api.backends.chunks import Done, StreamError, TextDelta
+    from apps.api.tests.fake_adapter import FakeStreamingAdapter
+
+    # Raise a retriable establishment error on attempt 1, succeed on 2.
+    fake = FakeStreamingAdapter(
+        [
+            StreamError(
+                code="provider_unavailable", message="503", retriable=True
+            ),
+            TextDelta(text="recovered"),
+            Done(tokens_in=1, tokens_out=1, cost_usd=0.001, latency_ms=10),
+        ]
+    )
+    app.state.adapters = {"openrouter": fake}
+
+    from src.routing.schema import RoutingDecision
+
+    def fake_decide(*args, **kwargs):
+        return RoutingDecision(
+            backend="openrouter",
+            model_or_agent="openai/gpt-5",
+            rationale="test",
+            confidence=0.9,
+            signals={},
+        )
+
+    monkeypatch.setattr("apps.api.routes.turn.decide", fake_decide)
+
+    async with app.router.lifespan_context(app):
+        async with httpx.AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test"
+        ) as client:
+            thread_id = await _create_thread(client)
+            events: list[str] = []
+            async with client.stream(
+                "POST",
+                f"/api/v1/threads/{thread_id}/turn",
+                json={"message": "hi"},
+            ) as resp:
+                async for line in resp.aiter_lines():
+                    if line.startswith("event:"):
+                        events.append(line.split(":", 1)[1].strip())
+                        if events[-1] == "done":
+                            break
+
+    # After a successful retry the recovered text_delta reaches the wire
+    # and the stream terminates normally (no surfaced stream_error).
+    assert "text_delta" in events
+    assert events[-1] == "done"
+
+
+async def test_first_token_no_retry(
+    monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    """RELI-01 (D-01 boundary): NO retry after the first chunk streamed.
+
+    Target behavior: once any chunk has reached the consumer, a
+    subsequent mid-stream error is NOT retried (retrying would replay
+    already-streamed tokens). The handler surfaces the error and a
+    terminal Done; it does NOT re-invoke the adapter.
+    """
+
+    app = _fresh_app(monkeypatch, tmp_path)
+
+    from apps.api.backends.chunks import Done, StreamError, TextDelta
+    from apps.api.tests.fake_adapter import FakeStreamingAdapter
+
+    # A chunk streams FIRST, then a retriable error: must NOT retry.
+    fake = FakeStreamingAdapter(
+        [
+            TextDelta(text="partial"),
+            StreamError(
+                code="provider_unavailable", message="503", retriable=True
+            ),
+            Done(),
+        ]
+    )
+    app.state.adapters = {"openrouter": fake}
+
+    from src.routing.schema import RoutingDecision
+
+    def fake_decide(*args, **kwargs):
+        return RoutingDecision(
+            backend="openrouter",
+            model_or_agent="openai/gpt-5",
+            rationale="test",
+            confidence=0.9,
+            signals={},
+        )
+
+    monkeypatch.setattr("apps.api.routes.turn.decide", fake_decide)
+
+    async with app.router.lifespan_context(app):
+        async with httpx.AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test"
+        ) as client:
+            thread_id = await _create_thread(client)
+            text_delta_count = 0
+            async with client.stream(
+                "POST",
+                f"/api/v1/threads/{thread_id}/turn",
+                json={"message": "hi"},
+            ) as resp:
+                async for line in resp.aiter_lines():
+                    if line.startswith("event: text_delta"):
+                        text_delta_count += 1
+                    if line.startswith("event: done"):
+                        break
+
+    # Exactly ONE text_delta — a retry would have replayed the partial.
+    assert text_delta_count == 1, (
+        "first-token boundary: no retry may replay already-streamed tokens"
+    )
+
+
+@pytest.mark.timeout(10)
+async def test_wall_clock_exceeded_emitted(
+    monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    """RELI-02: a wall-clock deadline trip emits StreamError(wall_clock_exceeded)
+    + Done, distinct from ``timeout``.
+
+    Target behavior: the turn handler enforces a per-turn wall-clock
+    deadline. When a stream runs past it, the handler emits a
+    ``wall_clock_exceeded`` StreamError (one of the two D-05 codes added
+    in Plan 01) followed by the terminal Done. The code is DISTINCT from
+    the provider-level ``timeout`` code.
+    """
+
+    # Pin a small per-turn wall-clock so the 30s-stalling fake trips the
+    # deadline well inside the @pytest.mark.timeout(10) budget. The
+    # resolver reads this env knob at AdapterOptions construction (Task 1).
+    monkeypatch.setenv("RELI_OPENROUTER_WALL_S", "1")
+
+    app = _fresh_app(monkeypatch, tmp_path)
+
+    from apps.api.backends.chunks import Done, TextDelta
+    from apps.api.tests.fake_adapter import FakeStreamingAdapter
+
+    # A stream that stalls past the (to-be-added) per-turn deadline.
+    fake = FakeStreamingAdapter(
+        [TextDelta(text="slow"), Done()], sleep_per_chunk=30.0
+    )
+    app.state.adapters = {"openrouter": fake}
+
+    from src.routing.schema import RoutingDecision
+
+    def fake_decide(*args, **kwargs):
+        return RoutingDecision(
+            backend="openrouter",
+            model_or_agent="openai/gpt-5",
+            rationale="test",
+            confidence=0.9,
+            signals={},
+        )
+
+    monkeypatch.setattr("apps.api.routes.turn.decide", fake_decide)
+
+    codes: list[str] = []
+    async with app.router.lifespan_context(app):
+        async with httpx.AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test"
+        ) as client:
+            thread_id = await _create_thread(client)
+            async with client.stream(
+                "POST",
+                f"/api/v1/threads/{thread_id}/turn",
+                json={"message": "hi"},
+            ) as resp:
+                current = None
+                async for line in resp.aiter_lines():
+                    if line.startswith("event:"):
+                        current = line.split(":", 1)[1].strip()
+                    elif line.startswith("data:") and current == "stream_error":
+                        codes.append(json.loads(line.split(":", 1)[1])["code"])
+                    if line.startswith("event: done"):
+                        break
+
+    assert "wall_clock_exceeded" in codes, (
+        "a stalled turn must surface wall_clock_exceeded (distinct from timeout)"
+    )
+    assert "timeout" not in codes, "wall-clock trip is NOT the provider timeout code"
+
+
+async def test_budget_exceeded_distinct_from_cost_cap(
+    monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    """RELI-02: a USD over-cap kill-switch trip emits
+    StreamError(budget_exceeded), distinct from ``cost_cap_exceeded``.
+
+    Target behavior: the turn handler enforces a per-turn USD backstop
+    independent of the adapter's own ``cost_cap_exceeded`` accounting.
+    When cumulative spend crosses the backstop, the handler emits the
+    ``budget_exceeded`` D-05 code (added in Plan 01) — a SEPARATE code
+    from the adapter-level ``cost_cap_exceeded`` so the UI and the retry
+    policy can distinguish the turn-level kill-switch from a single
+    adapter's cap.
+    """
+
+    app = _fresh_app(monkeypatch, tmp_path)
+
+    from apps.api.backends.chunks import Done, TextDelta
+    from apps.api.tests.fake_adapter import FakeStreamingAdapter
+
+    # A Done reporting spend that crosses the turn-level backstop
+    # (default openrouter usd_backstop is $0.50; 999.0 >> 0.50).
+    fake = FakeStreamingAdapter(
+        [
+            TextDelta(text="expensive"),
+            Done(tokens_in=1_000_000, tokens_out=1_000_000, cost_usd=999.0),
+        ]
+    )
+    app.state.adapters = {"openrouter": fake}
+
+    from src.routing.schema import RoutingDecision
+
+    def fake_decide(*args, **kwargs):
+        return RoutingDecision(
+            backend="openrouter",
+            model_or_agent="openai/gpt-5",
+            rationale="test",
+            confidence=0.9,
+            signals={},
+        )
+
+    monkeypatch.setattr("apps.api.routes.turn.decide", fake_decide)
+
+    codes: list[str] = []
+    async with app.router.lifespan_context(app):
+        async with httpx.AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test"
+        ) as client:
+            thread_id = await _create_thread(client)
+            async with client.stream(
+                "POST",
+                f"/api/v1/threads/{thread_id}/turn",
+                json={"message": "hi"},
+            ) as resp:
+                current = None
+                async for line in resp.aiter_lines():
+                    if line.startswith("event:"):
+                        current = line.split(":", 1)[1].strip()
+                    elif line.startswith("data:") and current == "stream_error":
+                        codes.append(json.loads(line.split(":", 1)[1])["code"])
+                    if line.startswith("event: done"):
+                        break
+
+    assert "budget_exceeded" in codes, (
+        "turn-level USD backstop must surface budget_exceeded"
+    )
+    assert "cost_cap_exceeded" not in codes, (
+        "budget_exceeded is the turn kill-switch, distinct from the "
+        "adapter-level cost_cap_exceeded"
+    )
+
+
+# =====================================================================
+# Phase 9 09-02 Task 1 — per-backend kill-switch ceiling resolver
+# =====================================================================
+#
+# RELI-02 / D-04: AdapterOptions exposes wall_clock_s + usd_backstop with
+# per-backend defaults resolved from env. Absent env var → the D-04
+# starting default; present env var → its value. These assert the
+# resolver wiring directly (Task 1 acceptance criterion 3).
+
+
+def test_resolve_backend_ceilings_env_override(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``RELI_OPENROUTER_WALL_S=5`` resolves a 5.0s deadline; unset → 120.0."""
+
+    from apps.api.routes.turn import _resolve_backend_ceilings
+
+    # Unset → D-04 chat-tier defaults (120s / $0.50).
+    monkeypatch.delenv("RELI_OPENROUTER_WALL_S", raising=False)
+    monkeypatch.delenv("RELI_OPENROUTER_USD", raising=False)
+    wall, usd = _resolve_backend_ceilings("openrouter")
+    assert wall == 120.0
+    assert usd == 0.50
+
+    # Present → its value.
+    monkeypatch.setenv("RELI_OPENROUTER_WALL_S", "5")
+    monkeypatch.setenv("RELI_OPENROUTER_USD", "0.25")
+    wall, usd = _resolve_backend_ceilings("openrouter")
+    assert wall == 5.0, "RELI_OPENROUTER_WALL_S=5 must resolve a 5.0s deadline"
+    assert usd == 0.25
+
+
+def test_resolve_backend_ceilings_agent_defaults(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Claude Code / computer-use default to the longer D-04 agent ceilings."""
+
+    from apps.api.routes.turn import _resolve_backend_ceilings
+
+    for backend in ("claude_code", "computer_use"):
+        monkeypatch.delenv(
+            f"RELI_{backend.upper()}_WALL_S", raising=False
+        )
+        monkeypatch.delenv(f"RELI_{backend.upper()}_USD", raising=False)
+        wall, usd = _resolve_backend_ceilings(backend)
+        assert wall == 600.0, f"{backend} wall-clock default is 600s (D-04)"
+        assert usd == 2.00, f"{backend} USD backstop default is $2.00 (D-04)"
+
+
+def test_adapter_options_constructible_with_no_ceiling_args() -> None:
+    """The frozen AdapterOptions stays constructible with no args (defaults)."""
+
+    from apps.api.backends.protocol import AdapterOptions
+
+    opts = AdapterOptions()
+    assert opts.wall_clock_s == 120.0
+    assert opts.usd_backstop == 0.50
+
+
+# =====================================================================
+# Phase 9 09-05 Task 1 — cancel persists the partial (RELI-03 / D-06)
+# + per-backend cancellation budget (Open Question 2)
+# =====================================================================
+#
+# RESEARCH Pitfall 5: trigger the teardown via ``task.cancel()`` on the
+# task driving the SERVER-side ``event_stream`` generator — NOT a faked
+# ``is_disconnected()`` (a no-op under ASGITransport). We drive the
+# route handler's returned EventSourceResponse ``body_iterator`` directly
+# so the CancelledError lands inside the generator after a TextDelta is
+# buffered but before the adapter's Done, then assert the ``finally``
+# block persisted the PARTIAL content_blocks with status='cancelled'.
+
+
+class _HangAfterDeltaAdapter:
+    """Yield one TextDelta, then await forever (until cancelled).
+
+    Models the real "mid-stream client disconnect" shape: a partial
+    answer has reached the buffer (one ``text_delta``) but the adapter
+    has NOT yet produced its terminal ``Done`` when the cancellation
+    arrives. The infinite await is what ``task.cancel()`` interrupts,
+    so the route's ``except asyncio.CancelledError`` handler fires with
+    a non-empty buffer (the buffered partial).
+    """
+
+    def __init__(self) -> None:
+        self.teardown_ran = False
+
+    async def stream(self, prompt, history, options):
+        from apps.api.backends.chunks import TextDelta
+
+        try:
+            yield TextDelta(text="partial-answer")
+            # Hang until the consumer task is cancelled — the generator's
+            # GeneratorExit/CancelledError on aclose() drives this teardown.
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            # The upstream adapter teardown (in_flight.close / interrupt /
+            # aclose) runs here on the real adapters; record that it ran.
+            self.teardown_ran = True
+            raise
+
+
+@pytest.mark.timeout(10)
+async def test_cancel_persists_partial_with_cancelled_status(
+    monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    """A task.cancel() mid-stream persists the partial with status='cancelled'.
+
+    D-06 keep-partial: after a buffered ``text_delta``, a cancellation
+    must reach ``persist_turn`` with (a) ``status='cancelled'`` and (b)
+    the buffered partial content present (the partial is NOT dropped).
+    We spy on ``persist_turn`` to capture the exact ``buffer`` + ``status``
+    the route handed it.
+    """
+
+    app = _fresh_app(monkeypatch, tmp_path)
+
+    from apps.api.backends.chunks import StreamError, TextDelta
+    import apps.api.routes.turn as turn_mod
+
+    fake = _HangAfterDeltaAdapter()
+    app.state.adapters = {"openrouter": fake}
+
+    from src.routing.schema import RoutingDecision
+
+    def fake_decide(*args, **kwargs):
+        return RoutingDecision(
+            backend="openrouter",
+            model_or_agent="openai/gpt-5",
+            rationale="test",
+            confidence=0.9,
+            signals={},
+        )
+
+    monkeypatch.setattr(turn_mod, "decide", fake_decide)
+
+    # Spy on persist_turn — capture the buffer + status the route passes.
+    captured: dict = {}
+
+    async def spy_persist_turn(db, *, buffer, status, **kwargs):
+        captured["buffer"] = list(buffer)
+        captured["status"] = status
+
+    monkeypatch.setattr(turn_mod, "persist_turn", spy_persist_turn)
+
+    async with app.router.lifespan_context(app):
+        async with httpx.AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test"
+        ) as client:
+            thread_id = await _create_thread(client)
+
+        # Build a Request and call the route handler directly so we own
+        # the SERVER-side generator (Pitfall 6: cancelling the httpx
+        # consumer does NOT inject http.disconnect under ASGITransport).
+        from fastapi import Request
+        from apps.api.routes.turn import TurnRequest, post_turn
+
+        scope = {
+            "type": "http",
+            "method": "POST",
+            "path": f"/api/v1/threads/{thread_id}/turn",
+            "headers": [],
+            "query_string": b"",
+            "app": app,
+        }
+
+        async def _receive():
+            # Never signal disconnect — the cancellation comes from
+            # task.cancel(), not the ASGI receive channel.
+            return {"type": "http.request", "body": b"", "more_body": False}
+
+        request = Request(scope, receive=_receive)
+        response = await post_turn(
+            thread_id, TurnRequest(message="hi"), request
+        )
+
+        # Drive the SSE generator until the partial text_delta is on the
+        # wire, then cancel the driving task mid-await.
+        body_iter = response.body_iterator
+        saw_partial = asyncio.Event()
+
+        async def drive() -> None:
+            async for event in body_iter:
+                payload = getattr(event, "data", "") or ""
+                if '"partial-answer"' in payload:
+                    saw_partial.set()
+
+        task = asyncio.create_task(drive())
+        await asyncio.wait_for(saw_partial.wait(), timeout=5.0)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+    # D-06: persist_turn must have been called with the PARTIAL buffer
+    # and status='cancelled'.
+    assert captured.get("status") == "cancelled", (
+        f"a cancelled turn must persist status='cancelled'; "
+        f"got {captured.get('status')!r}"
+    )
+    buffer = captured.get("buffer") or []
+    text_deltas = [c for c in buffer if isinstance(c, TextDelta)]
+    assert text_deltas, (
+        "the buffered partial (text_delta) must be persisted, not dropped "
+        "— D-06 keep-partial"
+    )
+    assert any(c.text == "partial-answer" for c in text_deltas), (
+        "the exact buffered partial content must survive into persist_turn"
+    )
+    # The terminal pair the handler appends must yield a 'cancelled' error.
+    errors = [c for c in buffer if isinstance(c, StreamError)]
+    assert errors and errors[-1].code == "cancelled", (
+        "the cancellation terminal pair must carry StreamError(cancelled)"
+    )
+    # The upstream adapter teardown ran (no orphaned upstream work).
+    assert fake.teardown_ran, (
+        "the adapter's CancelledError teardown must run on cancel "
+        "(no orphaned upstream spend — T-09-04)"
+    )
+
+
+def test_resolve_cancel_budget_per_backend(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Open Question 2: cancel budget is per-backend (chat ~2s; agents >2s).
+
+    Chat (openrouter) defaults to the BACKEND-07 ~2s budget; the agent
+    backends (claude_code / computer_use) default to a higher ceiling so
+    slow Playwright / subprocess teardown is not truncated. Each is
+    overridable from a per-backend env knob (mirrors the RELI-02 ceiling
+    resolver).
+    """
+
+    from apps.api.routes.turn import _resolve_cancel_budget
+
+    # Unset → defaults: chat 2.0s, agents 5.0s.
+    for backend in ("openrouter", "claude_code", "computer_use"):
+        monkeypatch.delenv(f"RELI_{backend.upper()}_CANCEL_S", raising=False)
+    assert _resolve_cancel_budget("openrouter") == 2.0, (
+        "chat cancel budget defaults to ~2s (BACKEND-07 / API-06)"
+    )
+    assert _resolve_cancel_budget("claude_code") > 2.0, (
+        "agent cancel budget must exceed the 2s chat ceiling (Open Question 2)"
+    )
+    assert _resolve_cancel_budget("computer_use") > 2.0, (
+        "computer-use cancel budget must exceed the 2s chat ceiling"
+    )
+
+    # Present env knob → its value (the budget is operator-tunable).
+    monkeypatch.setenv("RELI_CLAUDE_CODE_CANCEL_S", "8")
+    assert _resolve_cancel_budget("claude_code") == 8.0, (
+        "RELI_CLAUDE_CODE_CANCEL_S must override the agent default"
+    )
+
+
+def test_adapter_options_carries_cancel_budget() -> None:
+    """The frozen AdapterOptions exposes cancel_budget_s with a 2s default."""
+
+    from apps.api.backends.protocol import AdapterOptions
+
+    opts = AdapterOptions()
+    assert opts.cancel_budget_s == 2.0

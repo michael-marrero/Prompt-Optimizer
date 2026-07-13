@@ -124,6 +124,11 @@ class StreamError(BaseModel):
     """
 
     type: Literal["stream_error"] = "stream_error"
+    # CLOSED vocabulary — 11 values. The first 9 are the Phase 2 baseline
+    # (D-06); the final two were added additively in Phase 9 (D-05) for the
+    # per-turn wall-clock deadline and the budget-cap surface (distinct from
+    # the existing cost-cap code). Kept byte-for-byte in lockstep with
+    # ``StreamErrorCodeSchema`` in apps/web/lib/chunk-schemas.ts (same order).
     code: Literal[
         "cost_cap_exceeded",
         "step_cap_exceeded",
@@ -134,6 +139,8 @@ class StreamError(BaseModel):
         "timeout",
         "validation_error",
         "internal_error",
+        "wall_clock_exceeded",
+        "budget_exceeded",
     ]
     message: str
     retriable: bool
@@ -147,6 +154,13 @@ class Done(BaseModel):
     trip). ``routing_signals`` carries the Phase 1
     ``RoutingDecision.signals`` dict through to Phase 3 storage so a
     persisted turn can be replayed with its original rationale.
+
+    ``assistant_message_id`` (Phase 9, DEBT-04) is the OPTIONAL
+    server-assigned id of the assistant message this stream produced.
+    Added additively (mirrors how ``routing_signals`` was introduced):
+    it lets the feedback join key (Plan 04) bind to the server id for a
+    live turn, not just for a reloaded one. It is NEVER required, so the
+    discriminated-union required-field shape is unchanged.
     """
 
     type: Literal["done"] = "done"
@@ -155,6 +169,7 @@ class Done(BaseModel):
     cost_usd: float | None = None
     latency_ms: int | None = None
     routing_signals: dict[str, Any] | None = None
+    assistant_message_id: str | None = None
 
 
 # --------------------------------------------------------------------

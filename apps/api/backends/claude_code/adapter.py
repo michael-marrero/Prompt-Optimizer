@@ -104,6 +104,7 @@ from apps.api.backends.claude_code.step_counter import (
     StepCounter,
 )
 from apps.api.backends.cost import DEFAULT_PER_TURN_COST_USD
+from apps.api.backends.logging_filter import _redact_text
 from apps.api.backends.pricing import PricingTable
 from apps.api.backends.protocol import AdapterOptions, Message
 
@@ -296,7 +297,13 @@ class ClaudeCodeAdapter:
             cleanup_workspace = True
 
         # ----- Stage 2: tracker + step counter --------------------------
-        max_cost_usd = options.max_cost_usd or self._max_cost
+        # DEBT-02: honor an explicit 0.0 as a hard cap (``or`` treats 0.0
+        # as falsy); mirrors the turn.py request->cap ladder (CR-02).
+        max_cost_usd = (
+            options.max_cost_usd
+            if options.max_cost_usd is not None
+            else self._max_cost
+        )
         max_steps = options.max_steps or self._max_steps
         tracker = ClaudeCodeCostTracker(
             model_id=options.model or "claude-agent-sdk",
@@ -348,6 +355,17 @@ class ClaudeCodeAdapter:
 
                 if _is_assistant(msg):
                     steps.increment()  # D-15 — one step per AssistantMessage
+                    # Phase 11 (CTRL-03, Seam A): gate-and-drain the per-turn
+                    # control mailbox at this D-15 step boundary. The adapter
+                    # ONLY drains (FIFO, nothing stranded) — it NEVER emits a
+                    # named SSE event (Pitfall 1: that crosses the frozen
+                    # Phase-2 ChatChunk contract; the awaiting_approval emit is
+                    # owned by turn.py's generator). ``control_mailbox`` is None
+                    # when no control channel is wired (the no-op consumer just
+                    # drains and continues to the next step).
+                    mailbox = options.control_mailbox
+                    if mailbox is not None and mailbox.has_pending():
+                        mailbox.drain_all()
                     for block in getattr(msg, "content", []) or []:
                         if _is_text_block(block):
                             text = getattr(block, "text", "")
@@ -429,7 +447,7 @@ class ClaudeCodeAdapter:
                 if steps.exceeded():
                     yield StreamError(
                         code="step_cap_exceeded",
-                        message=f"Step cap of {steps.cap} reached.",
+                        message=_redact_text(f"Step cap of {steps.cap} reached."),
                         retriable=False,
                     )
                     # Pitfall 5: interrupt BEFORE break so the SDK
@@ -443,7 +461,7 @@ class ClaudeCodeAdapter:
                 if tracker.over_cap():
                     yield StreamError(
                         code="cost_cap_exceeded",
-                        message=(
+                        message=_redact_text(
                             f"Cost cap ${tracker.max_cost_usd:.6f} exceeded "
                             f"(used ${tracker.total():.6f})."
                         ),
@@ -476,7 +494,7 @@ class ClaudeCodeAdapter:
                     pass
             yield StreamError(
                 code="cancelled",
-                message="Stream cancelled by caller.",
+                message=_redact_text("Stream cancelled by caller."),
                 retriable=True,
             )
             yield Done(
@@ -491,7 +509,7 @@ class ClaudeCodeAdapter:
         except ProcessError as exc:
             yield StreamError(
                 code="provider_unavailable",
-                message=str(exc),
+                message=_redact_text(str(exc)),
                 retriable=False,
             )
             yield Done(routing_signals=options.routing_signals)
@@ -499,7 +517,7 @@ class ClaudeCodeAdapter:
         except ClaudeSDKError as exc:
             yield StreamError(
                 code="internal_error",
-                message=str(exc),
+                message=_redact_text(str(exc)),
                 retriable=False,
             )
             yield Done(routing_signals=options.routing_signals)
@@ -508,7 +526,7 @@ class ClaudeCodeAdapter:
             logger.exception("Claude Code adapter internal error")
             yield StreamError(
                 code="internal_error",
-                message=f"{type(exc).__name__}: {exc}",
+                message=_redact_text(f"{type(exc).__name__}: {exc}"),
                 retriable=False,
             )
             yield Done(routing_signals=options.routing_signals)

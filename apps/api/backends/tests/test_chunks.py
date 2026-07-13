@@ -117,6 +117,99 @@ def test_stream_error_rejects_invalid_code() -> None:
         StreamError(code="not_a_code", message="m", retriable=False)
 
 
+# --------------------------------------------------------------------
+# Phase 9 (D-05): StreamError.code grows additively to 11 codes. This is
+# the Python half of the byte-for-byte parity with StreamErrorCodeSchema
+# in apps/web/lib/chunk-schemas.ts; the Zod half is locked by
+# apps/web/tests/chunk-schemas.test.ts. Both sides MUST list the same 11
+# codes in the same order.
+# --------------------------------------------------------------------
+
+# The frozen, ordered vocabulary. Edit here ONLY in lockstep with the
+# Zod z.enum in apps/web/lib/chunk-schemas.ts.
+EXPECTED_STREAM_ERROR_CODES = (
+    "cost_cap_exceeded",
+    "step_cap_exceeded",
+    "cancelled",
+    "rate_limited",
+    "auth_failed",
+    "provider_unavailable",
+    "timeout",
+    "validation_error",
+    "internal_error",
+    "wall_clock_exceeded",
+    "budget_exceeded",
+)
+
+
+def _stream_error_code_literals() -> tuple[str, ...]:
+    """Extract the ordered ``code`` Literal args from the Pydantic model."""
+
+    from typing import get_args, get_type_hints
+
+    from apps.api.backends.chunks import StreamError
+
+    code_hint = get_type_hints(StreamError)["code"]
+    return tuple(get_args(code_hint))
+
+
+def test_stream_error_code_vocabulary_is_eleven_codes_in_order() -> None:
+    """D-05: exactly 11 codes, ordered, matching the Zod enum byte-for-byte."""
+
+    assert _stream_error_code_literals() == EXPECTED_STREAM_ERROR_CODES
+    assert len(EXPECTED_STREAM_ERROR_CODES) == 11
+
+
+@pytest.mark.parametrize("code", ["wall_clock_exceeded", "budget_exceeded"])
+def test_stream_error_accepts_new_phase9_codes(code: str) -> None:
+    """The two additive D-05 codes construct + round-trip cleanly."""
+
+    from apps.api.backends.chunks import StreamError, chat_chunk_adapter
+
+    err = StreamError(code=code, message="m", retriable=False)
+    restored = chat_chunk_adapter.validate_json(err.model_dump_json())
+    assert isinstance(restored, StreamError)
+    assert restored.code == code
+
+
+def test_all_eleven_stream_error_codes_validate() -> None:
+    """Every one of the 11 codes is accepted by the discriminated union."""
+
+    from apps.api.backends.chunks import StreamError, chat_chunk_adapter
+
+    for code in EXPECTED_STREAM_ERROR_CODES:
+        chunk = StreamError(code=code, message="m", retriable=False)
+        parsed = chat_chunk_adapter.validate_python(
+            {"type": "stream_error", "code": code, "message": "m", "retriable": False}
+        )
+        assert parsed.code == chunk.code == code
+
+
+def test_done_optional_assistant_message_id_defaults_none() -> None:
+    """DEBT-04: Done() with no assistant_message_id still validates (no shape break)."""
+
+    from apps.api.backends.chunks import Done, chat_chunk_adapter
+
+    d = Done()
+    assert d.assistant_message_id is None
+    # Discriminator routing for a bare {"type": "done"} is unchanged.
+    parsed = chat_chunk_adapter.validate_python({"type": "done"})
+    assert isinstance(parsed, Done)
+    assert parsed.assistant_message_id is None
+
+
+def test_done_carries_optional_assistant_message_id_through_round_trip() -> None:
+    """DEBT-04: when set, the server id survives model_dump_json round-trip."""
+
+    from apps.api.backends.chunks import Done, chat_chunk_adapter
+
+    d = Done(tokens_in=10, assistant_message_id="msg_srv_abc123")
+    restored = chat_chunk_adapter.validate_json(d.model_dump_json())
+    assert isinstance(restored, Done)
+    assert restored.assistant_message_id == "msg_srv_abc123"
+    assert restored.tokens_in == 10
+
+
 def test_done_default_construction_round_trip() -> None:
     from apps.api.backends.chunks import Done, chat_chunk_adapter
 

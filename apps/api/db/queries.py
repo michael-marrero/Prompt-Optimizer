@@ -570,6 +570,47 @@ async def insert_routing_decision(
 
 
 # --------------------------------------------------------------------
+# Control-substrate append-only audit writer (Phase 11, CTRL-02 / D-02)
+# --------------------------------------------------------------------
+
+
+async def insert_control_event(
+    db: aiosqlite.Connection,
+    *,
+    turn_id: str,
+    message: Any,
+) -> None:
+    """Append one ``control_events`` audit row WITHOUT committing.
+
+    ``message`` is the Phase 11 ``apps.api.control.ControlMessage``
+    Pydantic model — duck-typed here (``message.kind`` /
+    ``message.payload``) so this module never imports from
+    ``apps.api.control.*`` and stays import-light. ``payload`` is the
+    opaque D-01 JSON object: serialised via ``json.dumps`` when present,
+    stored as SQL NULL when ``None``.
+
+    Parameter substitution is ALWAYS via ``?`` placeholders — never an
+    f-string (T-11-01 SQL-injection mitigation). The caller owns the
+    commit so this composes inside a larger BEGIN/COMMIT block.
+    """
+
+    payload = getattr(message, "payload", None)
+    await db.execute(
+        "INSERT INTO control_events (id, turn_id, kind, payload,"
+        " received_at, delivered)"
+        " VALUES (?, ?, ?, ?, ?, ?)",
+        (
+            secrets.token_urlsafe(12),
+            turn_id,
+            message.kind,
+            json.dumps(payload) if payload is not None else None,
+            _now_iso(),
+            0,
+        ),
+    )
+
+
+# --------------------------------------------------------------------
 # Per-turn ONE-transaction writer
 # --------------------------------------------------------------------
 

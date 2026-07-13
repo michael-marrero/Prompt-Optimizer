@@ -67,6 +67,7 @@ from apps.api.backends.chunks import (
     ToolCall,
 )
 from apps.api.backends.cost import DEFAULT_PER_TURN_COST_USD
+from apps.api.backends.logging_filter import _redact_text
 from apps.api.backends.openrouter.cost import OpenRouterCostTracker
 from apps.api.backends.pricing import PricingTable
 from apps.api.backends.protocol import AdapterOptions, Message
@@ -172,6 +173,14 @@ class OpenRouterAdapter:
         return AsyncOpenAI(
             base_url=OPENROUTER_BASE_URL,
             api_key=api_key,
+            # RELI-01 / RESEARCH Pitfall 1: pin the SDK retry budget to
+            # zero so the application-level retry loop in turn.py is the
+            # SOLE retry authority. The openai SDK default is
+            # max_retries=2 with its own exponential backoff; left unset
+            # it silently stacks under the D-02 3-attempt loop (up to ~9
+            # upstream calls against a hard-down provider, shattering the
+            # ~10-15s worst-case budget). Adapters stay single-attempt.
+            max_retries=0,
             default_headers={
                 "HTTP-Referer": HTTP_REFERER,
                 "X-Title": X_TITLE,
@@ -194,7 +203,15 @@ class OpenRouterAdapter:
         """
 
         model_id = options.model or "openai/gpt-5"
-        max_cost_usd = options.max_cost_usd or self._max_cost
+        # DEBT-02: honor an explicit 0.0 as a hard "spend nothing" cap.
+        # ``or`` would treat 0.0 as falsy and silently fall back to the
+        # adapter default; an explicit ``is not None`` check mirrors the
+        # turn.py request->cap ladder (CR-02).
+        max_cost_usd = (
+            options.max_cost_usd
+            if options.max_cost_usd is not None
+            else self._max_cost
+        )
         tracker = OpenRouterCostTracker(
             model_id=model_id,
             max_cost_usd=max_cost_usd,
@@ -274,7 +291,7 @@ class OpenRouterAdapter:
                 if tracker.over_cap():
                     yield StreamError(
                         code="cost_cap_exceeded",
-                        message=(
+                        message=_redact_text(
                             f"Cost cap ${tracker.max_cost_usd:.6f} exceeded "
                             f"(used ${tracker.total():.6f})."
                         ),
@@ -297,7 +314,7 @@ class OpenRouterAdapter:
             # Pattern 7: emit terminal pair, then re-raise (PEP 789).
             yield StreamError(
                 code="cancelled",
-                message="Stream cancelled by caller.",
+                message=_redact_text("Stream cancelled by caller."),
                 retriable=True,
             )
             yield Done(
@@ -314,7 +331,7 @@ class OpenRouterAdapter:
         except AuthenticationError as exc:
             yield StreamError(
                 code="auth_failed",
-                message=str(exc),
+                message=_redact_text(str(exc)),
                 retriable=False,
             )
             yield Done(routing_signals=options.routing_signals)
@@ -322,7 +339,7 @@ class OpenRouterAdapter:
         except APITimeoutError as exc:
             yield StreamError(
                 code="timeout",
-                message=str(exc),
+                message=_redact_text(str(exc)),
                 retriable=True,
             )
             yield Done(routing_signals=options.routing_signals)
@@ -335,7 +352,7 @@ class OpenRouterAdapter:
             )
             yield StreamError(
                 code=code,
-                message=str(exc),
+                message=_redact_text(str(exc)),
                 retriable=(code == "rate_limited"),
             )
             yield Done(routing_signals=options.routing_signals)
@@ -344,7 +361,7 @@ class OpenRouterAdapter:
             logger.exception("OpenRouter adapter internal error")
             yield StreamError(
                 code="internal_error",
-                message=f"{type(exc).__name__}: {exc}",
+                message=_redact_text(f"{type(exc).__name__}: {exc}"),
                 retriable=False,
             )
             yield Done(routing_signals=options.routing_signals)

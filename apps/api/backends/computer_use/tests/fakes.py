@@ -85,6 +85,9 @@ class FakePlaywrightScreen:
         self.key_calls: list[str] = []
         self.goto_calls: list[str] = []
         self.scroll_calls: list[tuple[int, int, str, int]] = []
+        # DEBT-01: records the (clamped) duration the adapter hands to
+        # ``wait`` so the wait-clamp slice can assert the ceiling.
+        self.wait_calls: list[float] = []
         self.screenshot_count: int = 0
 
     async def start(self) -> None:
@@ -120,6 +123,11 @@ class FakePlaywrightScreen:
 
     async def goto(self, url: str) -> None:
         self.goto_calls.append(url)
+
+    async def wait(self, duration: float) -> None:
+        # DEBT-01: capture the clamped duration instead of actually
+        # sleeping so the test runs fast.
+        self.wait_calls.append(duration)
 
     async def aclose(self) -> None:
         self.aclose_count += 1

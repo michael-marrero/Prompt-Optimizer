@@ -68,6 +68,7 @@ from sklearn.metrics import (
 # Local imports — D-18 import-graph constraint preserved by virtue of
 # only importing `src.routing.*` which itself imports only stdlib +
 # scipy + joblib + pandas + sklearn + Feature_extractor.
+from src.calibration.coverage import calibration_status
 from src.feature_extraction.text_inputs import build_router_text_input_single
 from src.routing.config import (
     DEFAULT_AGENTIC_INTENT_TAU,
@@ -77,6 +78,8 @@ from src.routing.config import (
     DEFAULT_TASK_TYPE_TAU,
     FALLBACK_RATIONALE_SUFFIX,
     PROJECT_ROOT,
+    ece_threshold_for,
+    required_calibrated_heads,
 )
 from src.routing.decide import decide  # public surface from Plan 01-06
 
@@ -422,10 +425,17 @@ def _get_extractor():
 # ----------------------------------------------------------------------
 
 
-def run(canary_path: str, output_dir: str) -> dict:
+def run(canary_path: str, output_dir: str, artifacts: dict | None = None) -> dict:
     """Run the canary eval end-to-end. Returns a metrics dict for --check.
 
     Side effects: writes all 9 D-16 output files into `output_dir`.
+
+    Args:
+      artifacts: optional pre-loaded artifact dict (task_type_classifier,
+        agentic_intent_classifier, model_router, model_mapping). Defaults to
+        the live heads via `_load_artifacts()`. Epic 3's promotion gate passes
+        a candidate set (staged model_router swapped in) to evaluate it through
+        this exact pipeline without touching live models.
 
     Returns:
       dict with keys:
@@ -439,8 +449,9 @@ def run(canary_path: str, output_dir: str) -> dict:
     df = load_canary(canary_path)
     logger.info("Loaded %d canary rows", len(df))
 
-    logger.info("Loading calibrated artifacts ...")
-    artifacts = _load_artifacts()
+    if artifacts is None:
+        logger.info("Loading calibrated artifacts ...")
+        artifacts = _load_artifacts()
 
     extractor = _get_extractor()
 
@@ -787,6 +798,26 @@ def run(canary_path: str, output_dir: str) -> dict:
         flag = " (>= threshold!)" if row["ece"] > ECE_THRESHOLD else ""
         print(f"  {row['stage']:<32} ece={row['ece']:.4f}{flag}")
     print()
+
+    # Story 2.3: per-required-head calibration coverage vs. the manifest.
+    per_head_calibrated = calibration_status(artifacts)
+    ece_by_stage = {row["stage"]: row["ece"] for row in ece_rows}
+    print("Calibration coverage (required heads, per-head manifest threshold):")
+    for head in required_calibrated_heads():
+        is_cal = per_head_calibrated.get(head, False)
+        thr = ece_threshold_for(head)
+        ece = ece_by_stage.get(head)
+        ece_str = f"{ece:.4f}" if ece is not None else "n/a"
+        flag = ""
+        if not is_cal:
+            flag = " (UNCALIBRATED!)"
+        elif ece is not None and ece > thr:
+            flag = " (ece > threshold!)"
+        print(
+            f"  {head:<32} calibrated={'yes' if is_cal else 'no':<3} "
+            f"ece={ece_str} threshold={thr:.2f}{flag}"
+        )
+    print()
     print(f"low_confidence_rate = {low_conf_rate:.4f} "
           f"({n_fallback_actual}/{len(rows_df)} rows hit the fallback rationale)")
     if n_expected_fb == 0:
@@ -807,6 +838,11 @@ def run(canary_path: str, output_dir: str) -> dict:
     return {
         "backend_accuracy": overall_accuracy,
         "per_stage_ece": {row["stage"]: row["ece"] for row in ece_rows},
+        # Story 2.3: {head: is_calibrated} for each required head. Computed
+        # once above (where artifacts are already loaded) and reused here so
+        # evaluate_check stays a pure function over the metrics dict — no
+        # disk/artifact I/O inside it.
+        "per_head_calibrated": per_head_calibrated,
         "low_confidence_rate": low_conf_rate,
         "fallback_recall": fallback_recall,
         "n_rows": int(len(rows_df)),
@@ -819,7 +855,12 @@ def run(canary_path: str, output_dir: str) -> dict:
 
 
 def evaluate_check(metrics: dict) -> tuple[bool, list[str]]:
-    """Apply the --check thresholds. Returns (passed, list_of_failures)."""
+    """Apply the --check thresholds. Returns (passed, list_of_failures).
+
+    Pure function over the metrics dict (no disk/artifact I/O) so it stays
+    importable and unit-testable with synthetic dicts, and reusable by
+    Epic 3's FR-15 no-regression gate.
+    """
     failures: list[str] = []
 
     if metrics["backend_accuracy"] < BACKEND_ACCURACY_THRESHOLD:
@@ -828,10 +869,35 @@ def evaluate_check(metrics: dict) -> tuple[bool, list[str]]:
             f"threshold={BACKEND_ACCURACY_THRESHOLD:.4f}"
         )
 
-    for stage, ece in metrics["per_stage_ece"].items():
-        if ece > ECE_THRESHOLD:
+    per_stage_ece = metrics.get("per_stage_ece", {})
+    per_head_calibrated = metrics.get("per_head_calibrated", {})
+    required = required_calibrated_heads()
+
+    # Non-manifest stages (none today) still fall back to the global default
+    # threshold; required heads are checked per-head against the manifest below.
+    for stage, ece in per_stage_ece.items():
+        if stage not in required and ece > ECE_THRESHOLD:
             failures.append(
                 f"{stage} ece={ece:.4f} > threshold={ECE_THRESHOLD:.4f}"
+            )
+
+    # Story 2.3: per-required-head calibration coverage + per-head ECE vs. the
+    # manifest threshold. Fail-closed — a required head with no status or no
+    # ECE recorded is a failure, not a silent pass.
+    for head in required:
+        if head not in per_head_calibrated:
+            failures.append(f"{head} could not confirm calibration (no status in metrics)")
+            continue
+        if not per_head_calibrated[head]:
+            failures.append(f"{head} uncalibrated")
+            continue
+        if head not in per_stage_ece:
+            failures.append(f"{head} no ECE recorded")
+            continue
+        threshold = ece_threshold_for(head)
+        if per_stage_ece[head] > threshold:
+            failures.append(
+                f"{head} ece={per_stage_ece[head]:.4f} > threshold={threshold:.4f}"
             )
 
     return (len(failures) == 0, failures)

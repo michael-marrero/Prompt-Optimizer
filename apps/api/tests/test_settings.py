@@ -499,3 +499,92 @@ async def test_patch_settings_does_not_log_plaintext_keys(
     # current handler does NOT log the body at all (defense-in-depth
     # by omission), but Wave 6's regression will assert the marker
     # form once the canonical test lands.
+
+
+# =====================================================================
+# Phase 9 09-05 Task 2 — DEBT-05 backend defaults (priority /
+# cost_aware_fallback / zero_data_retention persisted on first boot)
+# =====================================================================
+#
+# Plan 04 (frontend) made the RoutingPrefs modal read these 3 keys back
+# from GET /settings. They are supplied inline by
+# _mask_settings_for_response today but were NOT in _default_settings(),
+# so they were never PERSISTED on first boot — a partial PATCH that
+# omitted them dropped them from the merge baseline. These assert the
+# server is the system-of-record: the 3 keys live in the canonical
+# defaults with the modal's values (RoutingPrefsProvider.tsx:35-47).
+
+
+def test_default_settings_includes_routing_pref_defaults() -> None:
+    """DEBT-05: _default_settings() carries the 3 routing-pref keys.
+
+    The values MUST match the Plan-04 modal defaults
+    (RoutingPrefsProvider.tsx:35-47) so the GET read-back agrees with the
+    client: priority="quality", cost_aware_fallback=False,
+    zero_data_retention=False.
+    """
+
+    from apps.api.settings import _default_settings
+
+    defaults = _default_settings()
+    assert defaults["priority"] == "quality", (
+        "default priority must be 'quality' (modal default)"
+    )
+    assert defaults["cost_aware_fallback"] is False, (
+        "default cost_aware_fallback must be False (modal default)"
+    )
+    assert defaults["zero_data_retention"] is False, (
+        "default zero_data_retention must be False (modal default)"
+    )
+
+
+def test_default_settings_returns_fresh_dict() -> None:
+    """The defaults stay a fresh dict per call (existing contract).
+
+    A caller mutating the returned dict (e.g. the PATCH-merge baseline)
+    must NOT poison the next call's defaults.
+    """
+
+    from apps.api.settings import _default_settings
+
+    first = _default_settings()
+    first["priority"] = "speed"
+    second = _default_settings()
+    assert second["priority"] == "quality", (
+        "_default_settings() must return a fresh dict each call"
+    )
+
+
+async def test_partial_patch_preserves_routing_pref_defaults(
+    monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    """DEBT-05: a partial PATCH no longer drops the 3 routing-pref keys.
+
+    Because the defaults now carry priority/cost_aware_fallback/
+    zero_data_retention, a PATCH that touches only ``default_max_cost_usd``
+    leaves the routing prefs intact in the GET read-back — the server is
+    authoritative (Plan-04 handoff: the client reads ``data.* ?? prev``).
+    """
+
+    app = _fresh_app(monkeypatch, tmp_path)
+    transport = ASGITransport(app=app)
+
+    async with app.router.lifespan_context(app):
+        async with httpx.AsyncClient(
+            transport=transport, base_url="http://test"
+        ) as client:
+            # PATCH only an unrelated field — the routing prefs are omitted.
+            patch_resp = await client.patch(
+                "/api/v1/settings",
+                json={"default_max_cost_usd": 0.25},
+            )
+            assert patch_resp.status_code == 200
+            # GET reads back: the routing prefs are STILL present at the
+            # modal defaults (not dropped by the partial merge).
+            get_resp = await client.get("/api/v1/settings")
+
+    assert get_resp.status_code == 200
+    body = get_resp.json()
+    assert body["priority"] == "quality"
+    assert body["cost_aware_fallback"] is False
+    assert body["zero_data_retention"] is False
