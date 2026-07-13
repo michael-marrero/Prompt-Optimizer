@@ -425,10 +425,17 @@ def _get_extractor():
 # ----------------------------------------------------------------------
 
 
-def run(canary_path: str, output_dir: str) -> dict:
+def run(canary_path: str, output_dir: str, artifacts: dict | None = None) -> dict:
     """Run the canary eval end-to-end. Returns a metrics dict for --check.
 
     Side effects: writes all 9 D-16 output files into `output_dir`.
+
+    Args:
+      artifacts: optional pre-loaded artifact dict (task_type_classifier,
+        agentic_intent_classifier, model_router, model_mapping). Defaults to
+        the live heads via `_load_artifacts()`. Epic 3's promotion gate passes
+        a candidate set (staged model_router swapped in) to evaluate it through
+        this exact pipeline without touching live models.
 
     Returns:
       dict with keys:
@@ -442,8 +449,9 @@ def run(canary_path: str, output_dir: str) -> dict:
     df = load_canary(canary_path)
     logger.info("Loaded %d canary rows", len(df))
 
-    logger.info("Loading calibrated artifacts ...")
-    artifacts = _load_artifacts()
+    if artifacts is None:
+        logger.info("Loading calibrated artifacts ...")
+        artifacts = _load_artifacts()
 
     extractor = _get_extractor()
 
