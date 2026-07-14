@@ -222,8 +222,10 @@ export const MessageRoutingSchema = z
     rationale: z.string(),
     override: z.boolean(),
     // Story 5.2: overall route confidence for the restored low-confidence nudge.
-    // Nullable — legacy rows (pre schema_v3) persisted no confidence.
-    confidence: z.number().nullable(),
+    // Nullable AND optional to match the TS MessageRow.routing type: the server
+    // always emits the key (null on legacy rows), but tolerating an absent key
+    // keeps the zod contract consistent with the optional TS shape + older fixtures.
+    confidence: z.number().nullable().optional(),
   })
   .nullable();
 export type MessageRoutingT = z.infer<typeof MessageRoutingSchema>;

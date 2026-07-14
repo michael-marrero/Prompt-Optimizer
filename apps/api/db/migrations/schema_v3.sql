@@ -9,9 +9,14 @@
 -- the nudge live but not on restore. ``decision.confidence`` is the min of the
 -- per-stage max-probabilities (src/routing/schema.py); NULL on legacy rows.
 --
--- APPEND-ONLY DDL (ALTER TABLE ADD COLUMN) — forward-only, non-destructive, so
--- the ``executescript()`` implicit-commit caveat in ``apps/api/db/migrate.py``
--- stays benign for this file.
+-- APPEND-ONLY DDL (ALTER TABLE ADD COLUMN) — forward-only, non-destructive.
+-- CAVEAT (review F3): this is NOT idempotent. SQLite has no
+-- ``ADD COLUMN IF NOT EXISTS``, and ``executescript()`` implicitly commits the
+-- ALTER before ``migrate.py`` bumps ``schema_meta.version``. A crash in that
+-- window leaves the column present but the version un-bumped, so the next boot
+-- re-runs this file and fails with ``duplicate column name: confidence``. This
+-- is a PRE-EXISTING property of the ADD-COLUMN migrations (schema_v1.sql shares
+-- it), deferred — not introduced here. Recovery is manual (bump schema_meta).
 --
 -- This file MUST NOT seed schema_meta: only schema_v0.sql does that, and
 -- ``migrate.py:up_to_latest`` owns the version bump (UPDATE to 3 after this runs).

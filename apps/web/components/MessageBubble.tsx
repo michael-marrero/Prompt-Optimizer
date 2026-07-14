@@ -140,6 +140,7 @@ export function MessageBubble({
       <LowConfidenceNudge
         overrideBackend={overrideBackend}
         onOverride={onOverride ?? (() => undefined)}
+        onRegenerate={handleRegenerate}
         computerUseEnabled={computerUseEnabled}
       />
       {/* assistant footer — folded metrics stat row + feedback actions (D-05) */}

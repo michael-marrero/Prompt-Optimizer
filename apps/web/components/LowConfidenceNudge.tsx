@@ -50,6 +50,12 @@ export interface LowConfidenceNudgeProps {
   overrideBackend: Backend | null;
   /** Arms the one-shot override for the next (re)send — the composer's setter. */
   onOverride: (backend: Backend | null) => void;
+  /** Regenerates THIS turn (message runtime reload). Picking a backend arms the
+   *  one-shot override and immediately re-runs the flagged turn through it — the
+   *  reload POST carries `override_backend` via the same transport hook the
+   *  composer uses (useChatThread prepareSendMessagesRequest), so the resend
+   *  actually reroutes. Omitted → arm-only (safe default for tests/isolation). */
+  onRegenerate?: () => void;
   /** Disables the computer-use item when computer-use is off (OverrideDropdown §9.2). */
   computerUseEnabled?: boolean;
 }
@@ -57,6 +63,7 @@ export interface LowConfidenceNudgeProps {
 export function LowConfidenceNudge({
   overrideBackend,
   onOverride,
+  onRegenerate,
   computerUseEnabled = false,
 }: LowConfidenceNudgeProps): React.JSX.Element | null {
   const message = useMessage({ optional: true }) as MessageStateShape | null;
@@ -86,7 +93,12 @@ export function LowConfidenceNudge({
       </span>
       <OverrideDropdown
         value={overrideBackend}
-        onChange={onOverride}
+        onChange={(backend) => {
+          onOverride(backend);
+          // A real backend choice (not "Auto") re-runs THIS turn through it now;
+          // "Auto" (null) just clears the arm without resending.
+          if (backend !== null) onRegenerate?.();
+        }}
         computerUseEnabled={computerUseEnabled}
       />
     </div>

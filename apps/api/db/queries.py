@@ -49,6 +49,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import secrets
 from datetime import datetime, timezone
 from typing import Any
@@ -553,6 +554,16 @@ async def insert_routing_decision(
 
     signals_dict = getattr(decision, "signals", None) or {}
     signals_json = json.dumps(signals_dict)
+    # Story 5.2 (review F5): coerce a non-finite confidence → NULL. A NaN would
+    # persist and later serialise to bare `NaN` (invalid JSON), breaking the
+    # strict client parse of the ENTIRE GET-messages response (whole-thread
+    # restore failure), not just this row. NULL restores as the safe no-nudge 1.
+    raw_confidence = getattr(decision, "confidence", None)
+    confidence = (
+        raw_confidence
+        if isinstance(raw_confidence, (int, float)) and math.isfinite(raw_confidence)
+        else None
+    )
     await db.execute(
         "INSERT INTO routing_decisions (id, message_id, task_type,"
         " task_confidence, agentic_intent, agentic_confidence,"
@@ -571,7 +582,8 @@ async def insert_routing_decision(
             _now_iso(),
             # Story 5.2: the route's overall confidence (schema_v3 column) —
             # persisted so the restored low-confidence nudge matches live (AD-7).
-            getattr(decision, "confidence", None),
+            # NaN/inf coerced to NULL above (review F5).
+            confidence,
         ),
     )
 
