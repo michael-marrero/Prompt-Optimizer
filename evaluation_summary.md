@@ -189,14 +189,30 @@ This is the learned semantic router using sentence embeddings.
 
 | Strategy          | Accuracy | Macro F1 | Weighted F1 | Estimated avg cost |
 | ----------------- | -------- | -------- | ----------- | ------------------ |
-| Oracle            | TBD      | TBD      | TBD         | TBD                |
-| Always Cheapest   | TBD      | TBD      | TBD         | TBD                |
-| Always GPT-5      | TBD      | TBD      | TBD         | TBD                |
-| Embedding Router  | TBD      | TBD      | TBD         | TBD                |
+| Oracle            | 1.000    | 1.000    | 1.000       | n/a (upper bound)  |
+| Always Cheapest   | skipped  | skipped  | skipped     | n/a¹               |
+| Always GPT-5      | 0.024    | 0.001    | 0.001       | n/a¹               |
+| Embedding Router² | 0.239    | 0.208    | 0.246       | n/a¹               |
 
-### Key finding
+*(Run 2026-07-13, `evaluate_baselines.py` → `evaluation/baseline_comparison_metrics.csv`. ¹Cost columns unavailable: `flat_records.csv` is regenerated from the uncommitted `data_raw/`, so per-model cost/score is absent in this checkout. Always-Cheapest skipped for the same reason. ²Embedding Router is graded at vendor-family granularity — not directly comparable to the exact-model strategies.)*
 
-Baseline comparison helps show whether the learned router is doing better than simple fixed strategies.
+### Key finding — the metric, not just the router, is the problem
+
+These numbers look alarming (Always-GPT-5 = 0.024) but the **target is misleading for a quality-first product**. `best_model` is defined as the *cheapest* model that achieves the top score, and `best_score` is essentially binary (0/1) correctness, so on any prompt where many models answer correctly the label collapses to a cost tiebreak among ~16–38 near-interchangeable models.
+
+Consequences:
+- **Oracle = 1.000 is a tautology** (it reads the label it's graded against).
+- **Always-GPT-5 = 0.024 does NOT mean GPT-5 gives bad answers** — it means GPT-5 is rarely the *cheapest* correct model. It says nothing about answer quality.
+- **Exact-model / embedding routers at ~0.2 are near the ceiling of an almost-unwinnable target**, not evidence a better feature representation would help (the embedding router — different features, same target — lands at the same ~0.2, which points at the target, not the features).
+
+**What was missing — now resolved.** A *quality-regret* metric — for each routing choice, the answer-quality (score) given up versus the oracle's best-available model, alongside cost — is the number that decides whether learned routing beats "always route to one strong model." The tool now exists: `src/evaluation/evaluate_quality_regret.py` (per-model mean regret + cost + coverage; reports the best fixed-model baseline; synthetic `--selftest`). It needs per-(model, question) scores (`flat_records.csv`), which regenerate from the uncommitted `data_raw/`; on a data-materialized machine run `python -m src.data.flatten_raw_jsons` then the regret eval.
+
+**Partial resolution from materialized data (`classifier_training.csv`, 27,203 questions, 2026-07-13):** the benchmark's routing target is dominated by cost, not quality —
+- **88.4%** of questions are solved by *some* model (`best_score` = 1.0): quality is abundant, not scarce.
+- **55%** of `best_model` picks are **zero-cost** models; median winner cost = 0; median 20 models compared per question.
+- `best_model` concentrates on small/cheap models (`internlm3-8b-instruct` 32%, `qwen3-235b` 19%); GPT-5 is the labelled best on only **2.4%**.
+
+**Implication for the product:** on this benchmark, picking *a* correct model is easy (many tie); the label is a cost tiebreak among interchangeable correct models — which is why exact-model routing caps at ~0.2 and Always-GPT-5 at 0.024. The defensible design is **detect the ~12% genuinely-hard prompts and route those strong; serve the easy 88% from any competent cheap model chosen by cost/latency** — i.e. the tier router (0.78) + a hard-prompt detector, not a 40-class exact-model head. **Caveat:** `best_score` is 0/1 benchmark-graded correctness on benchmark datasets; open-ended real chat prompts are not 0/1 gradeable, so "88% solved" will not transfer — quality differences on real traffic can only come from production feedback (Epic 3), and the benchmark should drive hard-prompt detection + cost, not exact-model choice.
 
 ---
 
