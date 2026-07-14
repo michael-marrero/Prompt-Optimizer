@@ -431,7 +431,12 @@ export function ChatSurface({
                 components={{
                   UserMessage,
                   AssistantMessage: () => (
-                    <MessageBubble threadId={effectiveThreadId} />
+                    <MessageBubble
+                      threadId={effectiveThreadId}
+                      overrideBackend={overrideBackend}
+                      onOverride={setOverrideBackend}
+                      computerUseEnabled={computerUseEnabled}
+                    />
                   ),
                 }}
               />

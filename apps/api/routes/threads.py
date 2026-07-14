@@ -121,10 +121,16 @@ class RoutingSummary(BaseModel):
     route. ``override`` is recovered server-side from the persisted
     ``signals`` JSON (``signals.override``; the override path also sets
     ``rationale == "user override"``).
+
+    Story 5.2: ``confidence`` carries the route's overall calibrated confidence
+    (schema_v3 column) so the restored low-confidence override nudge renders
+    identically to the live stream (AD-7). ``None`` on legacy rows written before
+    the column existed — the client falls back to a safe high (no nudge).
     """
 
     rationale: str
     override: bool
+    confidence: float | None = None
 
 
 class MessageWithRouting(BaseModel):

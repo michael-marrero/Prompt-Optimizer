@@ -403,7 +403,7 @@ async def get_thread_messages_with_routing(
         "SELECT m.id, m.thread_id, m.role, m.content_blocks, m.text,"
         " m.backend_used, m.model_used, m.cost_usd, m.latency_ms,"
         " m.tokens_in, m.tokens_out, m.created_at, m.status,"
-        " r.rationale, r.signals"
+        " r.rationale, r.signals, r.confidence"
         " FROM messages m"
         " LEFT JOIN routing_decisions r ON r.message_id = m.id"
         " WHERE m.thread_id = ?"
@@ -431,6 +431,10 @@ async def get_thread_messages_with_routing(
                 routing = {
                     "rationale": row[13],
                     "override": bool(signals.get("override")),
+                    # Story 5.2: overall route confidence (schema_v3). NULL on
+                    # legacy rows written before the column existed → the client
+                    # falls back to a safe 1.0 (no nudge) in reconstruct-messages.
+                    "confidence": row[15],
                 }
             rows.append(
                 {
@@ -552,8 +556,8 @@ async def insert_routing_decision(
     await db.execute(
         "INSERT INTO routing_decisions (id, message_id, task_type,"
         " task_confidence, agentic_intent, agentic_confidence,"
-        " predicted_model, rationale, signals, decided_at)"
-        " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        " predicted_model, rationale, signals, decided_at, confidence)"
+        " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         (
             decision_id,
             message_id,
@@ -565,6 +569,9 @@ async def insert_routing_decision(
             getattr(decision, "rationale", ""),
             signals_json,
             _now_iso(),
+            # Story 5.2: the route's overall confidence (schema_v3 column) —
+            # persisted so the restored low-confidence nudge matches live (AD-7).
+            getattr(decision, "confidence", None),
         ),
     )
 

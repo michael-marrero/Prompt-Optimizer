@@ -259,6 +259,10 @@ async def test_get_thread_messages_returns_chronological_with_routing(
             assert auto_asst["routing"] is not None
             assert auto_asst["routing"]["rationale"], "auto turn needs a rationale"
             assert auto_asst["routing"]["override"] is False
+            # Story 5.2: the route's confidence round-trips through the DB
+            # (schema_v3 column) so the restored low-confidence nudge matches
+            # live (AD-7). The stub decides confidence=0.9.
+            assert auto_asst["routing"]["confidence"] == 0.9
 
             assert override_asst["routing"] is not None
             assert override_asst["routing"]["rationale"] == "user override"

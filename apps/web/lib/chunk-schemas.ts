@@ -218,7 +218,13 @@ export type ContentBlockT = z.infer<typeof ContentBlockSchema>;
 
 // The D-01 routing join sub-object (null when absent).
 export const MessageRoutingSchema = z
-  .object({ rationale: z.string(), override: z.boolean() })
+  .object({
+    rationale: z.string(),
+    override: z.boolean(),
+    // Story 5.2: overall route confidence for the restored low-confidence nudge.
+    // Nullable — legacy rows (pre schema_v3) persisted no confidence.
+    confidence: z.number().nullable(),
+  })
   .nullable();
 export type MessageRoutingT = z.infer<typeof MessageRoutingSchema>;
 
