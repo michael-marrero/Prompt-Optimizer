@@ -45,6 +45,7 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import math
 import os
 import sys
 from typing import Optional
@@ -894,10 +895,16 @@ def evaluate_check(metrics: dict) -> tuple[bool, list[str]]:
         if head not in per_stage_ece:
             failures.append(f"{head} no ECE recorded")
             continue
+        head_ece = per_stage_ece[head]
         threshold = ece_threshold_for(head)
-        if per_stage_ece[head] > threshold:
+        # Fail-closed on a NaN ECE: `NaN > threshold` is False, so an unmeasurable
+        # calibration would otherwise pass silently. Mirrors the live promotion
+        # gate (promote_candidate.gate_calibration G3), which already guards this.
+        if isinstance(head_ece, float) and math.isnan(head_ece):
+            failures.append(f"{head} ece is NaN (calibration could not be measured)")
+        elif head_ece > threshold:
             failures.append(
-                f"{head} ece={per_stage_ece[head]:.4f} > threshold={threshold:.4f}"
+                f"{head} ece={head_ece:.4f} > threshold={threshold:.4f}"
             )
 
     return (len(failures) == 0, failures)

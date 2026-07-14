@@ -294,6 +294,29 @@ def test_check_flag_fails_when_any_ece_above_threshold():
     assert any("task_type_classifier" in f and "ece" in f for f in failures)
 
 
+def test_check_flag_fails_closed_on_nan_ece():
+    """Deferred F(2.3-#4): a required head with a NaN ECE must FAIL, not pass.
+
+    `NaN > threshold` is False, so without the guard an unmeasurable calibration
+    slips through the gate. Mirrors the live promotion gate's G3 NaN guard.
+    """
+    from src.evaluation.evaluate_routing import evaluate_check
+
+    metrics = {
+        "backend_accuracy": 0.95,
+        "per_stage_ece": {
+            "task_type_classifier": float("nan"),  # unmeasurable — must fail closed
+            "agentic_intent_classifier": 0.03,
+            "model_router": 0.07,
+        },
+        "per_head_calibrated": _all_calibrated(),
+        "low_confidence_rate": 0.15,
+    }
+    passed, failures = evaluate_check(metrics)
+    assert passed is False
+    assert any("task_type_classifier" in f and "NaN" in f for f in failures)
+
+
 def test_check_flag_fails_when_required_head_uncalibrated():
     """Story 2.3: a required head reported uncalibrated fails, naming the head."""
     from src.evaluation.evaluate_routing import evaluate_check
