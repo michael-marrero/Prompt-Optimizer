@@ -74,10 +74,10 @@ development_status:
   epic-3-retrospective: optional
 
   # Epic 4 — Task-Label Taxonomy Cleanup (Evidence-Gated) (DEF-2)
-  epic-4: backlog
-  4-1-produce-evidence-the-labels-are-the-weakness: backlog
-  4-2-apply-the-merged-taxonomy-and-retrain: backlog
-  4-3-validate-the-merge-through-the-gate-before-adoption: backlog
+  epic-4: halted  # 2026-07-13: evidence gate (4.1) returned NO-GO → merge not justified; epic halted by design (user-confirmed). See go_no_go_decision.md.
+  4-1-produce-evidence-the-labels-are-the-weakness: done  # code review 2026-07-13: 8 patches applied (leakage-honesty, feature-col guard, robustness); 28 passed
+  4-2-apply-the-merged-taxonomy-and-retrain: wont-do  # NO-GO from 4.1 (trio confusion 0.085 < 0.15; escape 0.117 dominates) — retrain tax not paid per gate design
+  4-3-validate-the-merge-through-the-gate-before-adoption: wont-do  # unreachable: depends on 4.2 which is wont-do
   epic-4-retrospective: optional
 
   # Epic 5 — Confidence Signal (DEFERRED — UX Spike First) (DEF-4)
