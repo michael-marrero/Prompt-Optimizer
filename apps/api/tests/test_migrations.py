@@ -161,16 +161,16 @@ async def test_up_to_latest_idempotent() -> None:
     db = await open_db(":memory:")
     try:
         # ``up_to_latest`` walks to the HIGHEST schema_v*.sql on disk.
-        # Phase 11 added schema_v2.sql, so latest is now 2 (was 1 pre-
-        # Phase 11). The idempotency property under test is unchanged:
-        # the second run is a no-op and the version stays put.
+        # Story 5.2 added schema_v3.sql (routing_decisions.confidence), so
+        # latest is now 3 (Phase 11 was 2). The idempotency property under
+        # test is unchanged: the second run is a no-op and the version stays put.
         await up_to_latest(db)
         v1 = await read_schema_version(db)
-        assert v1 == 2, f"first run version {v1}"
+        assert v1 == 3, f"first run version {v1}"
 
         await up_to_latest(db)
         v2 = await read_schema_version(db)
-        assert v2 == 2, f"second run version {v2}"
+        assert v2 == 3, f"second run version {v2}"
 
         async with db.execute("SELECT COUNT(*) FROM schema_meta") as cur:
             count = (await cur.fetchone())[0]
@@ -234,12 +234,12 @@ async def test_v0_to_v1_preserves_data() -> None:
         await up_to_latest(db)
 
         # Step 4a: schema_meta.version bumped to the HIGHEST schema_v*.sql
-        # on disk. Phase 11 added schema_v2.sql, so up_to_latest from v0
-        # now lands on 2 (was 1 pre-Phase 11). The substantive STORE-03
+        # on disk. Story 5.2 added schema_v3.sql, so up_to_latest from v0
+        # now lands on 3 (Phase 11 was 2). The substantive STORE-03
         # assertions below — seeded rows preserved + the schema_v1 index
         # present — are unchanged.
         v = await read_schema_version(db)
-        assert v == 2, f"expected version 2, got {v}"
+        assert v == 3, f"expected version 3, got {v}"
 
         # Step 4b: seeded rows still present by literal ID.
         async with db.execute(
@@ -335,12 +335,13 @@ async def test_v1_to_v2_creates_control_events() -> None:
         assert tc == 1, f"expected 1 thread pre-migration, got {tc}"
         assert mc == 2, f"expected 2 messages pre-migration, got {mc}"
 
-        # Step 3: advance v1 -> v2.
+        # Step 3: advance v1 -> latest (walks through v2, then v3).
         await up_to_latest(db)
 
-        # Step 4a: schema_meta.version bumped to 2.
+        # Step 4a: schema_meta.version bumped to the latest on disk (3 as of
+        # Story 5.2); control_events (v2) still lands on the way — asserted below.
         v = await read_schema_version(db)
-        assert v == 2, f"expected version 2, got {v}"
+        assert v == 3, f"expected version 3, got {v}"
 
         # Step 4b: control_events table landed.
         async with db.execute(

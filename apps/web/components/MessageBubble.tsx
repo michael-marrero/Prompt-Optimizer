@@ -31,6 +31,7 @@ import { ChatBubble } from "@/components/ChatBubble";
 import { CodeBubble } from "@/components/CodeBubble";
 import { ComputerUseBubble } from "@/components/ComputerUseBubble";
 import { RoutingChip } from "@/components/RoutingChip";
+import { LowConfidenceNudge } from "@/components/LowConfidenceNudge";
 import { MetricsFooter } from "@/components/MetricsFooter";
 import { FeedbackButtons } from "@/components/FeedbackButtons";
 import type { Backend } from "@/lib/types";
@@ -64,11 +65,21 @@ export interface MessageBubbleProps {
   /** The originating user prompt for this turn — forwarded to FeedbackButtons
    *  as the D-12 row's `prompt`. */
   prompt?: string;
+  /** Story 5.2 low-confidence nudge wiring — the composer's one-shot override
+   *  state/setter + computer-use availability, threaded from ChatSurface so the
+   *  nudge offers the EXISTING FR-3 override path. Omitted → the nudge still
+   *  renders but its dropdown is a no-op (safe default for tests/isolation). */
+  overrideBackend?: Backend | null;
+  onOverride?: (backend: Backend | null) => void;
+  computerUseEnabled?: boolean;
 }
 
 export function MessageBubble({
   threadId,
   prompt,
+  overrideBackend = null,
+  onOverride,
+  computerUseEnabled = false,
 }: MessageBubbleProps = {}): React.JSX.Element {
   const messageRuntime = useMessageRuntime();
   const handleRegenerate = (): void => {
@@ -124,6 +135,14 @@ export function MessageBubble({
         <RoutingChip />
       </div>
       <div data-testid={testid}>{bubble}</div>
+      {/* Story 5.2 — low-confidence override nudge (below the bubble; renders
+          only for completed, low-confidence auto routes). */}
+      <LowConfidenceNudge
+        overrideBackend={overrideBackend}
+        onOverride={onOverride ?? (() => undefined)}
+        onRegenerate={handleRegenerate}
+        computerUseEnabled={computerUseEnabled}
+      />
       {/* assistant footer — folded metrics stat row + feedback actions (D-05) */}
       <div className="mt-2 flex items-center justify-between">
         <MetricsFooter />

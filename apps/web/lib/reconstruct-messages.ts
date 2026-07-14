@@ -73,7 +73,13 @@ export interface MessageRow {
   tokens_in: number | null;
   tokens_out: number | null;
   status: "complete" | "error" | "cancelled";
-  routing: { rationale: string; override: boolean } | null;
+  routing: {
+    rationale: string;
+    override: boolean;
+    // Story 5.2: overall route confidence; null on legacy rows (pre schema_v3).
+    // Optional so pre-5.2 callers/fixtures compile — absent → the safe 1 default.
+    confidence?: number | null;
+  } | null;
 }
 
 // `UIMessage.parts` is a union of pre-conversion part shapes. The data-* parts
@@ -98,15 +104,18 @@ function reconstructUIMessage(row: MessageRow): UIMessage {
 
   // 1. routing part FIRST. backend defaults to "openrouter" (the default
   //    ChatBubble) when backend_used is null; signals carries ONLY the D-08
-  //    override flag (or an empty object). confidence:1 is the F-2 safe default
-  //    — it is never read for render (Assumption A2), only telemetry.
+  //    override flag (or an empty object). Story 5.2 makes confidence load-bearing
+  //    for render (the low-confidence nudge), so it now restores the PERSISTED
+  //    value (schema_v3); legacy rows with no stored confidence fall back to 1
+  //    (a safe "high" that never triggers the nudge — AD-7 parity for new rows,
+  //    graceful no-nudge for old ones).
   parts.push({
     type: "data-routing",
     data: {
       backend: row.backend_used ?? "openrouter",
       model_or_agent: row.model_used ?? "",
       rationale: row.routing?.rationale ?? "",
-      confidence: 1,
+      confidence: row.routing?.confidence ?? 1,
       signals: row.routing?.override ? { override: true } : {},
     },
   } as PartElement);

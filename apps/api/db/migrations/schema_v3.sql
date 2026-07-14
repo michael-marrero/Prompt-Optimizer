@@ -1,0 +1,29 @@
+-- Epic 5 / Story 5.2 — persist the route's overall calibrated confidence.
+--
+-- Adds ``routing_decisions.confidence`` so a reloaded thread can render the
+-- low-confidence override affordance identically to the live stream (AD-7
+-- restore parity). Before this, ``confidence`` rode the SSE ``routing_decision``
+-- event live but was NEVER persisted — the read path
+-- (``get_thread_messages_with_routing``) reconstructed a placeholder
+-- ``confidence: 1`` (reconstruct-messages.ts), so a low-confidence turn showed
+-- the nudge live but not on restore. ``decision.confidence`` is the min of the
+-- per-stage max-probabilities (src/routing/schema.py); NULL on legacy rows.
+--
+-- APPEND-ONLY DDL (ALTER TABLE ADD COLUMN) — forward-only, non-destructive.
+-- CAVEAT (review F3): this is NOT idempotent. SQLite has no
+-- ``ADD COLUMN IF NOT EXISTS``, and ``executescript()`` implicitly commits the
+-- ALTER before ``migrate.py`` bumps ``schema_meta.version``. A crash in that
+-- window leaves the column present but the version un-bumped, so the next boot
+-- re-runs this file and fails with ``duplicate column name: confidence``. This
+-- is a PRE-EXISTING property of the ADD-COLUMN migrations (schema_v1.sql shares
+-- it), deferred — not introduced here. Recovery is manual (bump schema_meta).
+--
+-- This file MUST NOT seed schema_meta: only schema_v0.sql does that, and
+-- ``migrate.py:up_to_latest`` owns the version bump (UPDATE to 3 after this runs).
+--
+-- Cross-refs:
+--   - apps/api/db/queries.py (insert_routing_decision write, get_thread_messages_with_routing read)
+--   - apps/web/lib/reconstruct-messages.ts (row.routing.confidence ?? 1)
+--   - src/routing/schema.py (RoutingDecision.confidence)
+
+ALTER TABLE routing_decisions ADD COLUMN confidence REAL;
