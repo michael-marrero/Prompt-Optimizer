@@ -36,6 +36,12 @@ def _assert_fallback_decision(decision) -> None:
         f"Fallback rationale must end with {FALLBACK_SUFFIX!r}, got "
         f"{decision.rationale!r}"
     )
+    # Story 6.2: every fallback carries the brain's calibrated low-confidence
+    # verdict True — this is the UI nudge trigger (not a mis-scaled composite).
+    assert decision.signals.get("low_confidence") is True, (
+        f"Fallback must set signals.low_confidence=True, got "
+        f"{decision.signals.get('low_confidence')!r}"
+    )
 
 
 def test_fallback_rationale_phrase_gibberish() -> None:
@@ -156,6 +162,24 @@ def test_fallback_decision_is_json_serializable() -> None:
     assert parsed["backend"] == "openrouter"
     assert parsed["model_or_agent"] == "openrouter/auto"
     assert parsed["rationale"].endswith(FALLBACK_SUFFIX)
+
+
+def test_confident_route_marks_low_confidence_false() -> None:
+    """Story 6.2: a CONFIDENT route (all driving stages clear their calibrated
+    taus) must set signals.low_confidence=False so the UI nudge stays silent —
+    even though the numeric min()-composite can sit ~0.30 on a correct route.
+    'capital of France' is a canary-confirmed confident openrouter route."""
+    from src.routing.decide import decide
+
+    decision = decide("what is the capital of France?")
+    # Confident: NOT the fallback route, and explicitly flagged not-low.
+    assert not decision.rationale.endswith(FALLBACK_SUFFIX), (
+        f"expected a confident (non-fallback) route, got {decision.rationale!r}"
+    )
+    assert decision.signals.get("low_confidence") is False, (
+        f"confident route must set signals.low_confidence=False, got "
+        f"{decision.signals.get('low_confidence')!r}"
+    )
 
 
 def test_fallback_signals_record_diagnostic_telemetry() -> None:

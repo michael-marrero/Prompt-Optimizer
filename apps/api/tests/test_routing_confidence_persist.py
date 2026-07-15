@@ -74,6 +74,64 @@ async def _persisted_confidence(confidence: float) -> float | None:
         await db.close()
 
 
+async def _persisted_low_confidence(signals: dict) -> bool:
+    """Insert a routing decision with the given signals; return the restored
+    routing.low_confidence (Story 6.2 — the nudge trigger recovered from the
+    persisted signals JSON by get_thread_messages_with_routing)."""
+    db = await open_db(":memory:")
+    try:
+        await up_to_latest(db)
+        thread = await create_thread(db, title="t")
+        await insert_assistant_message_with_blocks(
+            db,
+            message_id="m1",
+            thread_id=thread.id,
+            text="answer",
+            content_blocks="[]",
+            backend_used="openrouter",
+            model_used="openrouter/auto",
+            cost_usd=None,
+            latency_ms=None,
+            tokens_in=None,
+            tokens_out=None,
+        )
+        await insert_routing_decision(
+            db,
+            decision_id="d1",
+            message_id="m1",
+            decision=_FakeDecision(
+                model_or_agent="openrouter/auto",
+                rationale="close call - low confidence — fallback",
+                confidence=0.31,
+                signals=signals,
+            ),
+        )
+        await db.commit()
+        rows = await get_thread_messages_with_routing(db, thread.id)
+        [assistant] = [r for r in rows if r["role"] == "assistant"]
+        return assistant["routing"]["low_confidence"]
+    finally:
+        await db.close()
+
+
+@pytest.mark.asyncio
+async def test_low_confidence_true_round_trips() -> None:
+    # Story 6.2 — a fallback's low_confidence=True survives persist→restore so
+    # the reloaded nudge matches the live stream (AD-7).
+    assert await _persisted_low_confidence({"low_confidence": True}) is True
+
+
+@pytest.mark.asyncio
+async def test_low_confidence_false_round_trips() -> None:
+    assert await _persisted_low_confidence({"low_confidence": False}) is False
+
+
+@pytest.mark.asyncio
+async def test_low_confidence_absent_restores_false() -> None:
+    # Legacy rows (pre-6.2 signals with no key) must default to not-low → no nudge.
+    assert await _persisted_low_confidence({"task_type": "coding"}) is False
+
+
 @pytest.mark.asyncio
 async def test_finite_confidence_round_trips() -> None:
     assert await _persisted_confidence(0.4) == 0.4

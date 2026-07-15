@@ -60,7 +60,13 @@ python_files = ["test_*.py"]
 # importlib mode keeps each src/<package>/tests/ directory in its own
 # import namespace; otherwise the duplicate bare "tests" package names
 # collide in sys.modules during collection.
-addopts = "-x -q --import-mode=importlib"
+# -m "not live" makes the `live` marker truly opt-in (per its "skipped by
+# default" contract below): once a real key lands in ./.env, apps.api's
+# load_dotenv() puts it in os.environ, so the skipif-on-key guard alone would
+# let live tests RUN (and bill) on a plain `pytest` run. The default marker
+# expression excludes them; the live-smoke CI passes `-m live` explicitly,
+# which overrides this (the CLI -m wins over addopts).
+addopts = "-x -q --import-mode=importlib -m 'not live'"
 asyncio_mode = "auto"
 markers = [
     "live: hits real provider APIs (BYOK required); skipped by default",

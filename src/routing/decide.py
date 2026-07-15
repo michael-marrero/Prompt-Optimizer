@@ -287,12 +287,21 @@ def _build_fallback_decision(
         f"Fallback rationale did not end with locked suffix: {rationale!r}"
     )
 
+    # Story 6.2: the brain's OWN calibrated uncertainty verdict. Every
+    # fallback path funnels through here, and a fallback fires exactly when a
+    # driving stage's *calibrated* probability missed its per-stage tau
+    # (config.py: 0.35/0.55/0.20, Epic 2). The UI low-confidence nudge keys
+    # off this boolean — NOT a mis-scaled min()-of-3 composite compared to an
+    # arbitrary 0.5 (which fired on ~every turn). ponytail: reuse the verdict
+    # the brain already computed; don't invent a second, uncalibrated threshold.
+    fallback_signals = dict(signals)
+    fallback_signals["low_confidence"] = True
     return RoutingDecision(
         backend=FALLBACK_BACKEND,
         model_or_agent=FALLBACK_MODEL_OR_AGENT,
         rationale=rationale,
         confidence=float(confidence),
-        signals=dict(signals),
+        signals=fallback_signals,
     )
 
 
@@ -430,6 +439,10 @@ def decide(
             # High-precision keyword/coding path fired — emit decision.
             # Confidence is the min of per-stage max-probs (task + agentic).
             confidence = min(task_conf, agentic_conf)
+            # Story 6.2: confident route (cleared the agentic tau + a
+            # high-precision keyword/coding rule fired) — explicitly NOT a
+            # low-confidence fallback, so the UI nudge stays silent.
+            signals["low_confidence"] = False
             rationale = (
                 f"task={task_label} | agentic={agentic_label} | {rule_reason}"
             )
@@ -550,6 +563,10 @@ def decide(
         # Stage 6 — emit RoutingDecision
         # ----------------------------------------------------------
         confidence = min(task_conf, agentic_conf, router_conf)
+        # Story 6.2: confident route — every stage cleared its calibrated
+        # tau, so this is NOT a low-confidence fallback (UI nudge stays silent
+        # even though the min()-composite may sit ~0.30 on a correct route).
+        signals["low_confidence"] = False
         rationale = (
             f"task={task_label} | agentic={agentic_label} "
             f"| model_router={router_label} | chosen={chosen_slug} "

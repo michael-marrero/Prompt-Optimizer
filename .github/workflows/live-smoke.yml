@@ -34,12 +34,17 @@ jobs:
       - name: Sync dependencies
         run: uv sync --locked --all-extras --dev
 
-      - name: Live smoke (OpenRouter only)
+      - name: Live smoke (OpenRouter adapter + end-to-end turn)
         continue-on-error: true
         env:
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
         run: |
-          uv run pytest -m live apps/api/backends/openrouter -x --maxfail=1
+          # Adapter-level smoke + Story 6.4 (CERT-04) end-to-end turn smoke:
+          # decide() -> /turn -> real OpenRouter -> SSE -> persist.
+          uv run pytest -m live \
+            apps/api/backends/openrouter \
+            apps/api/tests/test_live_turn.py \
+            -x --maxfail=1
 
   # D-08 weekly live canary — one REAL-OpenRouter browser turn on top of the
   # deterministic PR gate. The PR-gate drift step (web-test.yml) fakes the

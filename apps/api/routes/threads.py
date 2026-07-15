@@ -131,6 +131,10 @@ class RoutingSummary(BaseModel):
     rationale: str
     override: bool
     confidence: float | None = None
+    # Story 6.2: the routing brain's calibrated low-confidence-fallback verdict,
+    # recovered from the persisted signals JSON. This is the nudge trigger (AD-7
+    # restore parity). Defaults False so legacy rows never nudge.
+    low_confidence: bool = False
 
 
 class MessageWithRouting(BaseModel):

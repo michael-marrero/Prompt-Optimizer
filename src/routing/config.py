@@ -103,9 +103,31 @@ BUILD_KEYWORDS: frozenset[str] = frozenset({
 })
 
 # Browse / interact verbs that, when combined with agentic_intent=True,
-# route to computer-use. Verbatim from D-01.
+# route to computer-use. The first row is the D-01 verbatim set; the second
+# row is Story 6.3's conservative extension — high-precision browse phrases
+# only. Ambiguous single words ("read"/"check"/"search"/"find") are
+# deliberately EXCLUDED — a URL/web-domain (WEB_TLDS + the policy matcher) is
+# the disambiguator for those. Substring-matched, so multi-word phrases work.
 BROWSE_KEYWORDS: frozenset[str] = frozenset({
     "open", "browse", "url", "click", "navigate", "visit", "fill", "submit",
+})
+# Story 6.3 NOTE: a keyword expansion (headlines/log in/sign in/…) was trialled
+# and REJECTED in code review — substring matching bled across word boundaries
+# ("sign in" ⊂ "de-sign in the figma file", "log in" ⊂ "cata-log in-formation")
+# and generic verbs over-captured coding prompts. The URL/web-domain matcher
+# (WEB_TLDS below + policy._contains_url_or_domain) is the sole 6.3 signal; the
+# D-01 verbatim keyword set above is unchanged.
+
+# Story 6.3 — curated web TLDs for URL / bare-domain browse detection (the
+# D-15 "URL -> computer-use" signal, finally implemented). A website named in
+# an agentic prompt (with no competing coding signal — see policy.py) is a
+# high-precision browse signal. This list EXCLUDES source-code file extensions
+# (py, js, ts, go, rs, md, json, …) so "app.py" never reads as a domain, and
+# EXCLUDES short word-like TLDs (me, to, so, ly, tv, …) that collide with
+# ordinary prose ("read.me", "note.to"). The policy matcher additionally
+# rejects numbers ("3.14"), initialisms ("U.S."), and email domains ("a@b.com").
+WEB_TLDS: frozenset[str] = frozenset({
+    "com", "org", "net", "io", "gov", "edu", "co", "ai", "dev", "app", "news",
 })
 
 

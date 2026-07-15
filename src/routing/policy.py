@@ -46,6 +46,7 @@ D-01 cascade reference (verbatim from 01-CONTEXT.md lines 29-33):
 
 from __future__ import annotations
 
+import re
 from typing import Optional
 
 from src.routing.config import (
@@ -56,7 +57,33 @@ from src.routing.config import (
     COMPUTER_USE_SENTINEL,
     DEFAULT_EPSILON,
     TIER_RANK,
+    WEB_TLDS,
 )
+
+# Story 6.3 — URL / bare-domain browse signal (implements the D-15
+# "URL -> computer-use" intent). Matches either an explicit http(s):// scheme
+# (unambiguous) OR a bare hostname whose FINAL label is a curated web TLD
+# (WEB_TLDS). Requiring a real TLD keeps it off code filenames ("app.py" — "py"
+# not a TLD), numbers ("3.14"), and initialisms ("u.s.").
+#
+# Hardening from code review:
+#   - Bounded quantifiers ({1,63} label, {0,4} subdomains) — DNS-realistic AND
+#     they defeat the O(n^2) backtracking a dot-chain ("a.a.a…") caused on the
+#     50k-char input bound (measured 5.7s at 32k before the bound).
+#   - Negative lookbehind (?<![@\w.]) — the bare-domain host must not follow '@'
+#     (email: "a@b.com" is a reference, not a browse target) or a word char / dot
+#     (mid-token). Operates on the already-lowercased prompt.
+# ponytail: one bounded regex over curated TLDs — no URL-parsing lib.
+_TLD_ALT = "|".join(sorted(WEB_TLDS))
+_URL_OR_DOMAIN_RE = re.compile(
+    r"https?://\S+"
+    r"|(?<![@\w.])[a-z0-9-]{1,63}(?:\.[a-z0-9-]{1,63}){0,4}\.(?:" + _TLD_ALT + r")\b"
+)
+
+
+def _contains_url_or_domain(prompt_lower: str) -> bool:
+    """True if the prompt names a URL or a web domain (curated-TLD host)."""
+    return _URL_OR_DOMAIN_RE.search(prompt_lower) is not None
 
 
 # ----------------------------------------------------------------------
@@ -113,6 +140,18 @@ def decide_backend(
     has_build_keyword = _contains_any_keyword(prompt_lower, build_keywords)
     has_browse_keyword = _contains_any_keyword(prompt_lower, browse_keywords)
     is_coding_task = task_type in coding_task_types
+    # Story 6.3: a URL/web-domain is a browse signal on its own (D-15). "return
+    # the top headlines on bloomberg.com" has no browse VERB but is clearly a
+    # browse task; the agentic gate upstream suppresses conversational domain
+    # mentions. BUT a URL defers to a competing coding signal — "refactor the
+    # client for api.stripe.com" / "clone github.com/x and fix the bug" name a
+    # domain yet are coding tasks — so a bare URL only counts as browse when no
+    # build keyword / coding task is present (an explicit browse keyword still
+    # wins outright, e.g. "open github.com and click login"). This also mops up
+    # domain-shaped code tokens (java.io, asp.net, self.app) that ride in coding
+    # prompts. Code-review fix (over-capture).
+    has_url = _contains_url_or_domain(prompt_lower)
+    url_is_browse = has_url and not (has_build_keyword or is_coding_task)
 
     # ------------------------------------------------------------------
     # Branch ordering note (Rule 2 deviation from D-01 literal `elif`):
@@ -133,9 +172,13 @@ def decide_backend(
     #   3. otherwise -> openrouter
     # ------------------------------------------------------------------
 
-    # Branch 1 — agentic + browse keyword (most specific)
-    if agentic_intent and has_browse_keyword:
-        reason = "agentic + browse/interact keyword -> computer-use"
+    # Branch 1 — agentic + browse keyword OR (URL/domain with no coding signal)
+    if agentic_intent and (has_browse_keyword or url_is_browse):
+        reason = (
+            "agentic + URL/domain -> computer-use"
+            if url_is_browse and not has_browse_keyword
+            else "agentic + browse/interact keyword -> computer-use"
+        )
         return ("computer_use", computer_use_sentinel, reason)
 
     # Branch 2 — agentic + (coding/instruction-following OR build kw)

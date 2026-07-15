@@ -436,6 +436,11 @@ async def get_thread_messages_with_routing(
                     # legacy rows written before the column existed → the client
                     # falls back to a safe 1.0 (no nudge) in reconstruct-messages.
                     "confidence": row[15],
+                    # Story 6.2: the brain's calibrated low-confidence-fallback
+                    # verdict, recovered from the persisted signals JSON (mirrors
+                    # ``override``). This is what the nudge keys off now, so it must
+                    # restore for AD-7 parity. Legacy rows have no key → False.
+                    "low_confidence": bool(signals.get("low_confidence")),
                 }
             rows.append(
                 {

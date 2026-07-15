@@ -7,16 +7,17 @@
 // the user sees an action, not a score.
 //
 // Contract:
-//   - Triggers on the EXISTING `confidence` field (no new SSE member — AD-4). It
-//     rides the live `routing_decision` event and is persisted (schema_v3), so a
-//     reloaded thread renders this identically to the live stream (AD-7 parity).
+//   - Triggers on the brain's calibrated fallback verdict `signals.low_confidence`
+//     (Story 6.2 — no new SSE member, it rides the free `signals` dict, AD-4). It
+//     rides the live `routing_decision` event and is persisted (schema_v3 signals
+//     JSON), so a reloaded thread renders this identically to the live stream (AD-7).
 //   - Renders nothing for above-threshold turns, manual overrides, or before the
 //     turn completes → no regression to FR-7 (AC #3).
 //
 // Data read mirrors RoutingChip.tsx exactly (useMessage().content → data-routing).
 //
 // Cross-refs:
-//   - apps/web/lib/confidence.ts (LOW_CONFIDENCE_THRESHOLD / isLowConfidence)
+//   - apps/web/lib/confidence.ts (isLowConfidence — signals.low_confidence)
 //   - apps/web/components/OverrideDropdown.tsx (the existing FR-3 path)
 //   - apps/web/components/MessageBubble.tsx (mounts this below the bubble)
 "use client";
@@ -75,8 +76,9 @@ export function LowConfidenceNudge({
 
   // Manual-override turns already reflect explicit user intent — never nudge.
   if (routing.signals?.override === true) return null;
-  // Only low-confidence auto routes (non-finite/missing confidence → no nudge).
-  if (!isLowConfidence(routing.confidence)) return null;
+  // Only low-confidence auto routes — the brain's own calibrated fallback
+  // verdict (signals.low_confidence). Missing/legacy signals → no nudge.
+  if (!isLowConfidence(routing.signals)) return null;
   // Only after the turn completes, so the nudge never flashes mid-stream.
   const complete =
     message?.status?.type === "complete" || content.some(isMetricsPart);

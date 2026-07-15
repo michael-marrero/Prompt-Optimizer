@@ -79,6 +79,9 @@ export interface MessageRow {
     // Story 5.2: overall route confidence; null on legacy rows (pre schema_v3).
     // Optional so pre-5.2 callers/fixtures compile — absent → the safe 1 default.
     confidence?: number | null;
+    // Story 6.2: the brain's calibrated low-confidence-fallback verdict, recovered
+    // server-side from the persisted signals JSON. Optional/absent → not low.
+    low_confidence?: boolean;
   } | null;
 }
 
@@ -116,7 +119,13 @@ function reconstructUIMessage(row: MessageRow): UIMessage {
       model_or_agent: row.model_used ?? "",
       rationale: row.routing?.rationale ?? "",
       confidence: row.routing?.confidence ?? 1,
-      signals: row.routing?.override ? { override: true } : {},
+      // Story 6.2: restore BOTH the override and the low-confidence-fallback
+      // verdict into signals so the reloaded nudge renders like the live stream
+      // (AD-7). Legacy rows have neither → empty signals → no nudge.
+      signals: {
+        ...(row.routing?.override ? { override: true } : {}),
+        ...(row.routing?.low_confidence ? { low_confidence: true } : {}),
+      },
     },
   } as PartElement);
 

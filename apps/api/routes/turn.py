@@ -148,6 +148,7 @@ from apps.api.backends.chunks import (
     Done,
     Screenshot,
     StreamError,
+    TextDelta,
 )
 from apps.api.backends.cost import DEFAULT_PER_TURN_COST_USD
 from apps.api.backends.logging_filter import _redact_text
@@ -603,6 +604,103 @@ def _synthesize_reroute_decision(
     )
 
 
+# --------------------------------------------------------------------
+# Story 6.1 — BYOK degradation when the routed backend's Anthropic key
+# is absent. AUTO turns only (mirrors the D-05 allowlist gating): the
+# brain may auto-pick an Anthropic-backed backend the user has no key
+# for. Rather than a 400 dead-end, coding degrades to a real OpenRouter
+# answer; browse returns a targeted "add your key" guidance turn (a chat
+# model cannot fake live browsing, so browse does NOT degrade to chat).
+# Explicit override turns are untouched — the user's manual pick wins
+# (Pitfall 7), including its existing missing-key 400.
+# --------------------------------------------------------------------
+
+_DEGRADE_REASON: str = "missing_anthropic_key"
+
+# Fixed guidance streamed when a browse prompt routes to computer_use but
+# computer-use can't run for lack of an Anthropic key. ponytail: one
+# constant, no template engine.
+_BROWSE_NO_KEY_GUIDANCE: str = (
+    "This looks like a live-browsing task. Those run on the computer-use "
+    "backend, which needs your Anthropic API key. Add it in Settings and "
+    "turn on computer-use to run browse-and-act prompts like this one."
+)
+
+
+def _synthesize_degrade_decision(original: RoutingDecision) -> RoutingDecision:
+    """Coding fallback to OpenRouter when the Anthropic key is absent (6.1).
+
+    Lands on ``openrouter/auto`` — OpenRouter's own router picks a capable
+    model per prompt (a coding prompt gets a coding-capable model), so no
+    model-router re-run is needed here. ``degraded_from*`` breadcrumbs are
+    DISTINCT from the D-05 ``rerouted_from`` breadcrumb so the Epic 3
+    retrain dataset can tell a key-degradation apart from an allowlist
+    reroute. ``confidence`` carries forward — the brain's intent estimate
+    is unchanged; only the dispatch target moved.
+    """
+
+    signals = dict(getattr(original, "signals", None) or {})
+    signals.pop("override", None)
+    signals["degraded_from"] = original.backend
+    signals["degraded_from_model"] = original.model_or_agent
+    signals["degradation_reason"] = _DEGRADE_REASON
+    model = _OVERRIDE_DEFAULTS.get("openrouter", "openrouter/auto")
+    return RoutingDecision(
+        backend="openrouter",  # type: ignore[arg-type] — Backend literal
+        model_or_agent=model,
+        rationale=f"Anthropic key absent — routed to OpenRouter ({model})",
+        confidence=original.confidence,
+        signals=signals,
+    )
+
+
+def _synthesize_browse_block_decision(
+    original: RoutingDecision,
+) -> RoutingDecision:
+    """Browse-without-key: keep ``computer_use`` on the record but mark it
+    blocked (6.1). The turn streams a fixed guidance message instead of
+    calling a provider — no degradation to a chat model, which cannot
+    actually browse. ``blocked_backend`` / ``block_reason`` breadcrumbs make
+    the block explicit in the offline dataset.
+    """
+
+    signals = dict(getattr(original, "signals", None) or {})
+    signals.pop("override", None)
+    signals["blocked_backend"] = original.backend
+    signals["block_reason"] = _DEGRADE_REASON
+    return RoutingDecision(
+        backend="computer_use",  # type: ignore[arg-type] — Backend literal
+        model_or_agent="computer_use/unavailable",
+        rationale=(
+            "computer-use unavailable (Anthropic key absent) — "
+            "returned setup guidance"
+        ),
+        confidence=original.confidence,
+        signals=signals,
+    )
+
+
+class _BrowseUnavailableAdapter:
+    """Canned ``BackendAdapter`` for the browse-without-key guidance turn.
+
+    Streams the fixed guidance message as a real, successful assistant turn
+    (TextDelta + terminal Done, cost 0) so the existing SSE + persist
+    pipeline runs unchanged and the UI renders it as a normal message, not
+    an error banner. No provider HTTP call is made. AD-4: reuses the frozen
+    chunk vocabulary — no new SSE member.
+    """
+
+    async def stream(self, prompt, history, options):  # noqa: ANN001
+        yield TextDelta(text=_BROWSE_NO_KEY_GUIDANCE)
+        yield Done(
+            tokens_in=0,
+            tokens_out=0,
+            cost_usd=0.0,
+            latency_ms=0,
+            routing_signals=getattr(options, "routing_signals", None),
+        )
+
+
 def _enabled_backends(settings: dict) -> list[str]:
     """Compute the ordered set of dispatch-eligible backends (D-05/D-06).
 
@@ -675,6 +773,27 @@ async def _get_or_create_adapter(app: Any, backend: str) -> Any:
         raise HTTPException(status_code=400, detail="computer-use is OFF — set COMPUTER_USE_OPT_IN=1 in env AND enable in settings panel")
 
     keystore = app.state.keystore
+
+    # Uniform missing-key pre-check → one clean pre-stream 400 for EVERY
+    # backend (Story 6.1 AC #6). Without it, openrouter/computer_use raise
+    # an SDK ``AuthenticationError`` on a missing key that the
+    # ``except RuntimeError`` below does NOT catch — surfacing as a 500.
+    # claude_code's ``RuntimeError`` preflight is still caught below as
+    # defense in depth. Skipped entirely when a fake adapter is
+    # pre-registered (the early return above), so tests are unaffected.
+    _provider, _env_label = {
+        "openrouter": ("openrouter", "OPENROUTER_API_KEY"),
+        "claude_code": ("anthropic", "ANTHROPIC_API_KEY"),
+        "computer_use": ("anthropic", "ANTHROPIC_API_KEY"),
+    }.get(backend, (None, "API key"))
+    if _provider is not None and not keystore.get(_provider):
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"{backend} backend requires {_env_label} — "
+                f"add it via PATCH /api/v1/settings or set the env var"
+            ),
+        )
 
     try:
         if backend == "openrouter":
@@ -802,6 +921,11 @@ async def post_turn(
     # Routing decision (override OR asyncio.to_thread(decide))
     # ----------------------------------------------------------------
 
+    # Story 6.1 — set when a browse prompt routes to computer_use but the
+    # Anthropic key is absent: the turn streams a fixed guidance message via
+    # _BrowseUnavailableAdapter instead of dispatching to a real adapter.
+    browse_blocked = False
+
     if body.override_backend is not None:
         # Pattern 11: skip decide() and synthesise a decision so the
         # UI's manual model picker flows through the same persistence
@@ -846,6 +970,40 @@ async def post_turn(
             )
             decision = _synthesize_reroute_decision(fallback, decision)
 
+        # ------------------------------------------------------------
+        # Story 6.1 — BYOK degradation, AFTER the allowlist reroute so it
+        # fires ONLY for a backend the user actually has ENABLED (it
+        # survived the allowlist). A backend the user disabled has already
+        # been rerouted to openrouter above — we never nag about a
+        # capability they turned off. Only when an enabled Anthropic
+        # backend has no key do we act: coding degrades to a real
+        # OpenRouter answer; browse returns a targeted guidance turn (a
+        # chat model cannot fake live browsing, so it does NOT degrade to
+        # chat).
+        # ------------------------------------------------------------
+        if not app.state.keystore.get("anthropic"):
+            if decision.backend == "claude_code" and "openrouter" in enabled:
+                # Degrade to OpenRouter — but ONLY when openrouter is
+                # actually enabled. _enabled_backends floors to
+                # ["openrouter"] only when the enabled set is otherwise
+                # EMPTY, so a user can disable openrouter while enabling
+                # claude_code. Degrading there anyway would breach D-05
+                # (dispatch to a backend the user turned off). When
+                # openrouter is disabled we fall through unchanged and the
+                # missing-key pre-check returns the honest claude_code 400.
+                logger.info(
+                    "byok_degrade from=claude_code to=openrouter turn_id=%s",
+                    turn_id,
+                )
+                decision = _synthesize_degrade_decision(decision)
+            elif decision.backend == "computer_use":
+                logger.info(
+                    "byok_browse_blocked backend=computer_use turn_id=%s",
+                    turn_id,
+                )
+                decision = _synthesize_browse_block_decision(decision)
+                browse_blocked = True
+
     # D-19 INFO log #2 — routing_decision. The rationale is bounded
     # by the Phase 1 fallback suffix locked string + the per-stage
     # signal strings (task_type / agentic_intent / rule_fired); it
@@ -878,7 +1036,12 @@ async def post_turn(
     # The D-12 gate fires inside _get_or_create_adapter and raises
     # HTTPException(400) BEFORE we open the SSE response — clean
     # error path per D-08.
-    adapter = await _get_or_create_adapter(app, decision.backend)
+    if browse_blocked:
+        # Story 6.1 — canned guidance stream; no real adapter, no provider
+        # call, no key required. Bypasses _get_or_create_adapter entirely.
+        adapter: Any = _BrowseUnavailableAdapter()
+    else:
+        adapter = await _get_or_create_adapter(app, decision.backend)
 
     # Per-turn cost cap precedence: request body > settings >
     # DEFAULT_PER_TURN_COST_USD (50¢).

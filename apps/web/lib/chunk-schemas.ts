@@ -226,6 +226,13 @@ export const MessageRoutingSchema = z
     // always emits the key (null on legacy rows), but tolerating an absent key
     // keeps the zod contract consistent with the optional TS shape + older fixtures.
     confidence: z.number().nullable().optional(),
+    // Story 6.2: the brain's calibrated low-confidence-fallback verdict, recovered
+    // server-side from the persisted signals JSON. This closed object is the RESTORE
+    // parse boundary (ChatSurface → MessagesResponseSchema.safeParse → reconstruct);
+    // Zod strips unknown keys, so WITHOUT this field the persisted verdict is dropped
+    // and the reloaded nudge silently disappears (AD-7 parity break). Optional so
+    // legacy rows/fixtures compile → absent → no nudge.
+    low_confidence: z.boolean().optional(),
   })
   .nullable();
 export type MessageRoutingT = z.infer<typeof MessageRoutingSchema>;
