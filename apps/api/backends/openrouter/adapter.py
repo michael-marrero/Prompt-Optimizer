@@ -227,12 +227,44 @@ class OpenRouterAdapter:
         in_flight = None
         start_t = asyncio.get_event_loop().time()
         try:
-            in_flight = await self._client.chat.completions.create(
-                model=model_id,
-                messages=messages,
-                stream=True,
-                stream_options={"include_usage": True},
-            )
+            try:
+                in_flight = await self._client.chat.completions.create(
+                    model=model_id,
+                    messages=messages,
+                    stream=True,
+                    stream_options={"include_usage": True},
+                )
+            except APIStatusError as exc:
+                # Story 6.5: a BYOK key may not have access to the routed model
+                # (e.g. a 404 "model not found" / 400 for a gpt-5-tier slug the
+                # account can't serve). OpenRouter's "openrouter/auto" meta-router
+                # always resolves to an available model, so fall back to it ONCE —
+                # here, BEFORE any chunk has streamed, so there is no partial
+                # output to reconcile. A non-model error (401 auth, 429, 5xx) or a
+                # repeat failure propagates to the APIStatusError handler below.
+                if model_id != "openrouter/auto" and exc.status_code in (400, 404):
+                    logger.info(
+                        "openrouter model %s unavailable (HTTP %s) — "
+                        "falling back to openrouter/auto",
+                        model_id,
+                        exc.status_code,
+                    )
+                    model_id = "openrouter/auto"
+                    # Re-key the cost tracker to the fallback model's pricing.
+                    tracker = OpenRouterCostTracker(
+                        model_id=model_id,
+                        max_cost_usd=max_cost_usd,
+                        pricing=self._pricing,
+                    )
+                    tracker.record_input_estimate(prompt=prompt, history=history)
+                    in_flight = await self._client.chat.completions.create(
+                        model=model_id,
+                        messages=messages,
+                        stream=True,
+                        stream_options={"include_usage": True},
+                    )
+                else:
+                    raise
 
             # Tool-call streaming is delta-indexed; accumulate by index.
             tool_calls: dict[int, dict[str, Any]] = {}
