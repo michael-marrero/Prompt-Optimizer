@@ -10,11 +10,16 @@ bundle to `models/staging/model_router.joblib` for Story 3.3 to gate. The live
 Only the model_router is retrainable from feedback: task_type/agentic heads need
 labels (`question_type`, binary agentic) that the feedback signal doesn't carry.
 
-Feature/serve-parity note (Story 3.2 D4): the production router text input carries
-Stage-1 `task_type`/`keyword_type` tokens; the 3.1 dataset omits them, so
-`build_router_text_input_series` emits the neutral `task_type_unknown` token. This
-is an accepted dry-run gap (Story 3.3 promotes nothing at 0 feedback); the close-out
-(projecting the captured `decision.signals.task_type`) is tracked in deferred-work.md.
+Feature/serve parity (Story 3.2 D4 — CLOSED 2026-07-14): the production router text
+input carries the Stage-1 `task_type` token + `question_type_confidence` numeric
+(decide.py Stage 4). build_retraining_dataset.py now projects the captured
+`decision.signals.task_type` / `task_confidence` into `question_type` /
+`question_type_confidence` columns, so `build_router_text_input_series` (reads the
+`question_type` column) and `get_numeric_feature_columns` (picks up
+`question_type_confidence`) reproduce the exact serve features here. `keyword_type`
+stays `unknown`, matching decide.py's hardcoded serve value. A pre-close-out dataset
+lacking the columns still trains (falls back to `unknown`/no-confidence-feature) — the
+schema is additive, not required.
 
 Mirrors the train_model_router pipeline (FeatureUnion word+char TF-IDF ⊕ scaled
 numerics ⊕ LogisticRegression ⊕ CalibratedClassifierCV(FrozenEstimator, sigmoid))

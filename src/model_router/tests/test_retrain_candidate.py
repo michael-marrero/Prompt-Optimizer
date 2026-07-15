@@ -43,6 +43,15 @@ def test_retrain_writes_calibrated_candidate_to_staging(tmp_path: Path) -> None:
     assert isinstance(bundle["model"], CalibratedClassifierCV)  # calibrated (Epic-2 contract)
     assert bundle["target_column"] == "original_model"
     assert isinstance(bundle["feature_columns"], list) and bundle["feature_columns"]
+    # Story 3.2 close-out (serve parity): the candidate trains on the same
+    # question_type_confidence numeric the live router serves with — it must be in
+    # feature_columns (get_numeric_feature_columns picks it up from the projected
+    # column), and the CSV must carry the question_type text token the router text
+    # input uses. Absent these, the candidate's feature schema would diverge from
+    # decide.py's and it must not be promoted.
+    assert "question_type_confidence" in bundle["feature_columns"]
+    header = ds.read_text(encoding="utf-8").splitlines()[0].split(",")
+    assert "question_type" in header and "question_type_confidence" in header
 
 
 def test_build_training_frame_keeps_only_up_rows() -> None:

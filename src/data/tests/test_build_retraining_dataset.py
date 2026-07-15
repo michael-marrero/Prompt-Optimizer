@@ -32,11 +32,17 @@ def _feedback(
     prompt: str = "write a python function to sort a list",
     rerouted_from: str | None = None,
     rerouted_from_model: str | None = None,
+    task_type: str | None = None,
+    task_confidence: float | None = None,
 ) -> dict:
     signals: dict = {}
     if rerouted_from is not None:
         signals["rerouted_from"] = rerouted_from
         signals["rerouted_from_model"] = rerouted_from_model
+    if task_type is not None:
+        signals["task_type"] = task_type
+    if task_confidence is not None:
+        signals["task_confidence"] = task_confidence
     return {
         "sentiment": sentiment,
         "timestamp": timestamp,
@@ -102,6 +108,36 @@ def test_end_to_end_csv_one_row_per_turn_with_features(tmp_path: Path) -> None:
     for col in ("message_id", "origin_query", "original_backend", "dispatched_backend", "label"):
         assert col in rows[0]
     assert "char_count" in rows[0]  # inline handcrafted feature attached
+
+
+def test_stage1_signal_projected_for_serve_parity(tmp_path: Path) -> None:
+    """Story 3.2 close-out: the captured Stage-1 signal (task_type/task_confidence)
+    is projected straight from decision.signals into the CSV so the candidate trains
+    on the exact features the brain served with — NOT re-derived."""
+    fb = tmp_path / "routing_feedback.jsonl"
+    out = tmp_path / "retraining_dataset.csv"
+    _write_jsonl(fb, [
+        _feedback("m1", "up", "2026-07-10T00:00:00Z", backend="openrouter", model="gpt-5",
+                  task_type="coding", task_confidence=0.82),
+    ])
+    assert main(["--routing-feedback", str(fb), "--output", str(out)]) == 0
+    row = next(csv.DictReader(out.open(encoding="utf-8")))
+    assert row["question_type"] == "coding"
+    assert float(row["question_type_confidence"]) == 0.82
+
+
+def test_stage1_signal_defaults_when_absent(tmp_path: Path) -> None:
+    """An override / signal-less turn projects the neutral values the brain itself
+    used at serve (unknown / 0.0) — never a crash, never a re-derivation."""
+    fb = tmp_path / "routing_feedback.jsonl"
+    out = tmp_path / "retraining_dataset.csv"
+    _write_jsonl(fb, [
+        _feedback("m1", "up", "2026-07-10T00:00:00Z", backend="openrouter", model="gpt-5"),
+    ])
+    assert main(["--routing-feedback", str(fb), "--output", str(out)]) == 0
+    row = next(csv.DictReader(out.open(encoding="utf-8")))
+    assert row["question_type"] == "unknown"
+    assert float(row["question_type_confidence"]) == 0.0
 
 
 def test_cleared_wins_over_earlier_whole_second_up(tmp_path: Path) -> None:

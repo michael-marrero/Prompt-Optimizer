@@ -10,7 +10,19 @@ and the up/down/cleared sentiment. Emits one labeled row per RATED turn:
     original_backend, original_model,          # the route the brain WANTED (Epic 1)
     dispatched_backend, dispatched_model,       # the route actually used
     label,                                       # up | down | cleared
+    question_type, question_type_confidence,     # Stage-1 signal the brain served with (parity)
     <handcrafted prompt features...>             # PromptFeatureExtractor, attached inline
+
+Feature/serve parity (Story 3.2 close-out): the production router text input carries the
+Stage-1 `task_type` token + `question_type_confidence` numeric (src/routing/decide.py Stage 4:
+`build_router_text_input_single(question_type=task_label, keyword_question_type="unknown")` +
+`extra_values={"question_type_confidence": task_conf}`). Those signals were captured on the
+turn — each feedback row's `decision.signals` carries `task_type` + `task_confidence` — so we
+project them straight through here (NOT re-derived via the live classifier, which would skew).
+`retrain_candidate` then reproduces the exact serve features: `build_router_text_input_series`
+reads the `question_type` column, `keyword_question_type` is absent → falls back to "unknown"
+(matching serve's hardcoded value), and `get_numeric_feature_columns` picks up
+`question_type_confidence`.
 
 Dedup: a turn is keyed on `message_id`; the latest event by timestamp wins, so a
 `cleared` supersedes an earlier up/down rather than duplicating the turn (AC #2).
@@ -71,6 +83,10 @@ BASE_FIELDS: list[str] = [
     "dispatched_backend",
     "dispatched_model",
     "label",
+    # Stage-1 signal the brain served with — projected from decision.signals so the
+    # candidate trains on the exact router features production used (serve parity).
+    "question_type",
+    "question_type_confidence",
 ]
 
 
@@ -87,6 +103,8 @@ class RatedTurn:
     dispatched_backend: str
     dispatched_model: str
     label: str
+    question_type: str
+    question_type_confidence: float
 
 
 def stream_jsonl(path: Path) -> Iterator[dict]:
@@ -162,8 +180,21 @@ def assemble_rated_turns(feedback_records: Iterable[dict]) -> dict[str, RatedTur
             dispatched_backend=dispatched_backend,
             dispatched_model=dispatched_model,
             label=str(rec.get("sentiment", "")),
+            # Stage-1 signal the brain served with (serve parity). Projected straight
+            # from the captured signals — never re-derived. Missing (e.g. an override
+            # turn) -> the neutral "unknown" / 0.0 the brain itself used there.
+            question_type=str(signals.get("task_type") or "unknown"),
+            question_type_confidence=_safe_float(signals.get("task_confidence")),
         )
     return turns
+
+
+def _safe_float(value: object) -> float:
+    """Coerce a possibly-missing/stringy confidence to float; default 0.0."""
+    try:
+        return float(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return 0.0
 
 
 def write_dataset(turns: dict[str, RatedTurn], output: Path) -> int:
@@ -193,6 +224,8 @@ def write_dataset(turns: dict[str, RatedTurn], output: Path) -> int:
                 "dispatched_backend": turn.dispatched_backend,
                 "dispatched_model": turn.dispatched_model,
                 "label": turn.label,
+                "question_type": turn.question_type,
+                "question_type_confidence": turn.question_type_confidence,
             }
             row.update(extractor.extract(turn.origin_query))
             writer.writerow(row)
