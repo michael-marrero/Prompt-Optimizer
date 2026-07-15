@@ -65,9 +65,11 @@ describe("globals.css — Plasma design tokens + 4 alternate theme blocks (D-06/
     expect(declaresProperty(css, "--accent", "#6d4aff")).toBe(true);
   });
 
-  it("D-07: :root declares the Plasma background --bg: #f8f6f1", () => {
+  it("Story 7.1: :root declares the answer-forward background --bg: #fbfbfa", () => {
+    // Was #f8f6f1 (warm paper); shifted to a cooler near-white canvas in the
+    // Epic 7 answer-forward redesign (user-approved 2026-07-15).
     const css = readGlobals();
-    expect(declaresProperty(css, "--bg", "#f8f6f1")).toBe(true);
+    expect(declaresProperty(css, "--bg", "#fbfbfa")).toBe(true);
   });
 
   it("D-06: a --danger custom property exists (dedicated destructive red, NOT --warn/magenta)", () => {

@@ -17,7 +17,7 @@
 //     visible body text).
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { render, screen, fireEvent } from "@testing-library/react";
 import { RoutingChip } from "@/components/RoutingChip";
 
 vi.mock("@assistant-ui/react", () => ({
@@ -97,7 +97,7 @@ describe("OverrideChip — L1/D-08 neutral override pill vs. auto optimized pill
     );
   });
 
-  it("L1: WITHOUT override renders the auto 'optimized' pill; rationale lives on aria-label", () => {
+  it("Story 7.2: WITHOUT override renders the 'model · why' element; rationale on aria-label + expandable panel", () => {
     mockedUseMessage.mockReturnValue(
       withRoutingPart({
         backend: "openrouter",
@@ -108,11 +108,16 @@ describe("OverrideChip — L1/D-08 neutral override pill vs. auto optimized pill
       }),
     );
     render(<RoutingChip />);
-    const chip = screen.getByRole("status");
-    // Visible body text is the lowercase "optimized" pill (L1), not inline rationale.
-    expect(chip.textContent).toMatch(/optimized/);
-    expect(chip.textContent).not.toMatch(/manual override/);
-    // Full rationale is on the accessible name (hover/AT path, UI-SPEC §0.3).
-    expect(chip.getAttribute("aria-label")).toMatch(/Routed to .*Strong reasoning fit/);
+    // The auto route is now an expandable "why" button (not a live-region pill).
+    const why = screen.getByRole("button");
+    expect(why.textContent).toMatch(/why/);
+    expect(why.textContent).toMatch(/GPT-5/i); // "gpt-5" → mapped display name
+    expect(why.textContent).not.toMatch(/manual override/);
+    // Full rationale still on the accessible name (hover/AT path, UI-SPEC §0.3).
+    expect(why.getAttribute("aria-label")).toMatch(/Routed to .*Strong reasoning fit/);
+    // Collapsed by default; clicking reveals the rationale panel.
+    expect(screen.queryByRole("region", { name: /routing rationale/i })).toBeNull();
+    fireEvent.click(why);
+    expect(screen.getByRole("region", { name: /routing rationale/i })).toBeInTheDocument();
   });
 });

@@ -66,10 +66,13 @@ export interface ChatBubbleProps {
   children?: ReactNode;
 }
 
+// Story 7.2 (answer-forward): the assistant ANSWER renders on the bare canvas —
+// no surface bubble/border — so it reads as the hero, Comet/Perplexity-style.
+// The user prompt keeps its light bubble (right-aligned) to stay visually distinct.
 const assistantContainerClass =
-  "bg-[var(--surface-2)] border border-[var(--line)] rounded-lg p-4 max-w-prose group relative";
+  "max-w-prose group relative pr-10";
 const userContainerClass =
-  "bg-[var(--surface-2)] border border-[var(--line)] rounded-lg p-4 max-w-prose ml-auto";
+  "bg-[var(--surface-2)] border border-[var(--line)] rounded-[var(--radius-lg)] px-4 py-2.5 max-w-prose ml-auto";
 
 // Shared action-row button class (Copy + Regenerate) — shadcn focus-ring
 // pattern + hover bg. Size h-7 w-7 matches UI-SPEC §8.3.
@@ -117,7 +120,7 @@ export function ChatBubble({
       {body}
       <div
         className={cn(
-          "absolute bottom-2 right-2 flex items-center gap-1",
+          "absolute top-0 right-0 flex items-center gap-1",
           "opacity-0 group-hover:opacity-100 focus-within:opacity-100",
           "transition-opacity duration-150",
         )}

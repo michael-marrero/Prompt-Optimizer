@@ -86,7 +86,7 @@ describe("RoutingChip — Plasma optimized pill (L1) + manual-override pill (D-0
   // ----------------------------------------------------------------
   // (a) AUTO route → optimized pill (L1 / UI-SPEC §0.3 + §Copywriting)
   // ----------------------------------------------------------------
-  it("L1: auto-route renders the lowercase 'optimized' pill (not the old inline chip)", () => {
+  it("Story 7.2: auto-route renders the 'model · why' element (model name + why, not 'optimized')", () => {
     mockedUseMessage.mockReturnValue(
       withRoutingPart({
         backend: "openrouter",
@@ -97,10 +97,9 @@ describe("RoutingChip — Plasma optimized pill (L1) + manual-override pill (D-0
       }),
     );
     render(<RoutingChip />);
-    // The visible text of the pill is the lowercase word "optimized"
-    // (JetBrains Mono 9.5px per UI-SPEC §Typography). It is NOT the old
-    // "Routed to … · …" inline body text.
-    expect(screen.getByText("optimized")).toBeInTheDocument();
+    const why = screen.getByRole("button");
+    expect(why.textContent).toMatch(/GPT-5/i); // mapped display name
+    expect(why.textContent).toMatch(/why/);
   });
 
   it("L1: optimized pill aria-label is 'Routed to {model} — {reason}' with an em-dash + FULL rationale", () => {
@@ -143,11 +142,9 @@ describe("RoutingChip — Plasma optimized pill (L1) + manual-override pill (D-0
       }),
     );
     render(<RoutingChip />);
-    // The display-name fallback (raw slug) is preserved under L1; it just lives
-    // on the aria-label now instead of the inline body.
-    const ariaLabel =
-      screen.getByText("optimized").closest("[aria-label]")?.getAttribute("aria-label") ??
-      "";
+    // The display-name fallback (raw slug "openai/gpt-5" — a REAL model id, not a
+    // sentinel) is preserved; it lives on the "why" button's aria-label.
+    const ariaLabel = screen.getByRole("button").getAttribute("aria-label") ?? "";
     expect(ariaLabel).toContain("Routed to openai/gpt-5");
   });
 
@@ -249,7 +246,7 @@ describe("RoutingChip — Plasma optimized pill (L1) + manual-override pill (D-0
     expect(screen.getByText(/manual override/i)).toBeInTheDocument();
   });
 
-  it("D-08: showBadge=true (default) renders the auto optimized pill", () => {
+  it("D-08: showBadge=true (default) renders the auto 'why' element", () => {
     mockedUseMessage.mockReturnValue(
       withRoutingPart({
         backend: "openrouter",
@@ -260,6 +257,6 @@ describe("RoutingChip — Plasma optimized pill (L1) + manual-override pill (D-0
       }),
     );
     render(<RoutingChip showBadge={true} />);
-    expect(screen.getByText("optimized")).toBeInTheDocument();
+    expect(screen.getByRole("button").textContent).toMatch(/why/);
   });
 });

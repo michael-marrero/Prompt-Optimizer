@@ -62,21 +62,10 @@ export function PageShell({ onOpenRoutingPrefs }: PageShellProps = {}): React.JS
             </span>
             <StatusStrip />
           </div>
+          {/* Story 7.3 (answer-forward): the Share/Export header shells were
+              removed — dead affordances with no handler. The header keeps only
+              the WIRED Routing button (opens the Routing Preferences modal). */}
           <div className="flex items-center gap-2">
-            <button
-              type="button"
-              className="inline-flex items-center gap-1.5 rounded-[9px] border border-[var(--line)] px-2.5 py-1.5 text-[12.5px] font-medium text-[var(--ink-2)] transition-colors hover:bg-[var(--surface-2)] hover:shadow-[var(--shadow-md)]"
-            >
-              <Icon name="share" size={16} />
-              Share
-            </button>
-            <button
-              type="button"
-              className="inline-flex items-center gap-1.5 rounded-[9px] border border-[var(--line)] px-2.5 py-1.5 text-[12.5px] font-medium text-[var(--ink-2)] transition-colors hover:bg-[var(--surface-2)] hover:shadow-[var(--shadow-md)]"
-            >
-              <Icon name="doc" size={16} />
-              Export
-            </button>
             <button
               type="button"
               onClick={openRoutingPrefs}

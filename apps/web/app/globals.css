@@ -22,35 +22,38 @@
  * on the rebuilt components' own class names in their owning Wave 2/3 plans. */
 @import "tailwindcss";
 
-/* ─── Theme defaults (Plasma — warm paper, electric violet) ─── */
+/* ─── Theme defaults (Plasma — answer-forward: clean near-white, electric violet) ───
+ * Story 7.1: shifted from warm paper toward a cooler, calmer Comet/Perplexity
+ * canvas so the ANSWER is the hero. Token NAMES are unchanged, so every
+ * component inherits the new look with no per-component edit. */
 :root {
-  --bg: #f8f6f1;
+  --bg: #fbfbfa;
   --bg-gradient: none;
   --surface: #ffffff;
-  --surface-2: #efece4;
-  --line: #e6e1d4;
-  --line-strong: #c8c2b1;
-  --ink: #14121f;
-  --ink-2: #3f3c4f;
-  --ink-3: #6c697b;
-  --ink-4: #98959f;
+  --surface-2: #f4f4f2;
+  --line: #eceae5;
+  --line-strong: #e0ddd6;
+  --ink: #1a1a1f;
+  --ink-2: #55535e;
+  --ink-3: #8a8892;
+  --ink-4: #b4b2b9;
   --accent: #6d4aff;
   --accent-hover: #5933ee;
-  --accent-soft: rgba(109, 74, 255, 0.10);
+  --accent-soft: rgba(109, 74, 255, 0.09);
   --accent-ink: #ffffff;
   --accent-2: #ff3d8b;
   --accent-3: #00e8c0;
-  --good: #00b884;
-  --warn: #ff3d8b;
-  /* D-06/O-6 — dedicated destructive red; NOT --warn (#ff3d8b magenta). */
+  --good: #12a67a;
+  --warn: #e08a1e;
+  /* D-06/O-6 — dedicated destructive red; NOT --warn. */
   --danger: #e5484a;
-  --shadow-sm: 0 1px 1px rgba(20, 18, 31, 0.04), 0 0 0 1px rgba(20, 18, 31, 0.05);
-  --shadow-md: 0 2px 6px rgba(20, 18, 31, 0.06), 0 0 0 1px rgba(20, 18, 31, 0.06);
-  --shadow-lg: 0 16px 48px -10px rgba(20, 18, 31, 0.18), 0 0 0 1px rgba(20, 18, 31, 0.06);
+  --shadow-sm: 0 1px 2px rgba(20, 18, 31, 0.04), 0 0 0 1px rgba(20, 18, 31, 0.045);
+  --shadow-md: 0 2px 6px rgba(20, 18, 31, 0.05), 0 0 0 1px rgba(20, 18, 31, 0.05);
+  --shadow-lg: 0 24px 60px -18px rgba(20, 18, 31, 0.20), 0 0 0 1px rgba(20, 18, 31, 0.05);
   --shadow-focus: 0 0 0 4px var(--accent-soft);
-  --radius: 9px;
+  --radius: 10px;
   --radius-sm: 6px;
-  --radius-lg: 14px;
+  --radius-lg: 16px;
   /* Font stacks — the next/font/google vars from layout.tsx fall back to the
    * LOCKED family stacks (UI-SPEC §Typography). */
   --display: var(--font-display), 'Instrument Sans', 'Inter Tight', ui-sans-serif, system-ui, sans-serif;

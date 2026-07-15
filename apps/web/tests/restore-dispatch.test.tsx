@@ -212,12 +212,11 @@ describe("SC-3 component-dispatch — restored message renders the right routing
       }),
     );
     render(<MessageBubble />);
-    // RoutingChip renders the optimized pill with role="status" and the FULL
-    // un-truncated rationale on aria-label. displayName resolves via
-    // model_mapping.json keyed by model_or_agent, falling back to the raw slug
-    // for an unmapped one — so the label always matches "Routed to … — …".
-    const pill = screen.getByText("optimized");
-    const label = pill.getAttribute("aria-label");
+    // Story 7.2: RoutingChip renders the "model · why" button carrying the FULL
+    // un-truncated rationale on aria-label. Target it by accessible name (the
+    // bubble also has copy/regenerate buttons).
+    const why = screen.getByRole("button", { name: /^Routed to/u });
+    const label = why.getAttribute("aria-label");
     expect(label).toMatch(/^Routed to .+ — .+$/u);
     // The em-dash is U+2014 (not a hyphen) and the rationale is carried verbatim.
     expect(label).toContain(" — Strong reasoning fit");

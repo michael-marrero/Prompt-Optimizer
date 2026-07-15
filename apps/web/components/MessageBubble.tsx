@@ -126,12 +126,11 @@ export function MessageBubble({
   }
 
   return (
-    <article className="mb-7">
-      {/* .msg header — mono role label + the L1 optimized / D-08 override pill */}
-      <div className="mb-1.5 flex items-center gap-2">
-        <span className="font-[var(--font-mono-plasma)] text-[10.5px] font-semibold uppercase tracking-[0.08em] text-[var(--ink-3)]">
-          Prompt Optimizer
-        </span>
+    <article className="mb-10">
+      {/* Story 7.1 (answer-forward): the routing element sits inline ABOVE the
+          answer with no competing "Prompt Optimizer" label — the answer is the
+          hero. RoutingChip becomes the "model · why" affordance in Story 7.2. */}
+      <div className="mb-2 flex items-center gap-2">
         <RoutingChip />
       </div>
       <div data-testid={testid}>{bubble}</div>

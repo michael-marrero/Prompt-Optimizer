@@ -476,21 +476,11 @@ export function ChatSurface({
                   runCompare.current(text);
                 }}
               />
+              {/* Story 7.3 (answer-forward): the deferred attachment/voice/web
+                  shells (paperclip/image/mic/globe) were removed — dead
+                  affordances with no backend this phase. The toolbar keeps only
+                  the WIRED controls: Compare, model override, and Send. */}
               <div className="mt-2 flex items-center gap-1">
-                {(["paperclip", "image", "mic", "globe"] as const).map((n) => (
-                  // Presentational icon row (Deferred): no upload/voice/web-search
-                  // backend this phase — render only, tabbable-out.
-                  <button
-                    key={n}
-                    type="button"
-                    aria-label={n}
-                    title={n}
-                    tabIndex={-1}
-                    className="inline-flex h-7 w-7 items-center justify-center rounded-[6px] text-[var(--ink-3)] hover:bg-[var(--surface-2)] hover:text-[var(--ink)]"
-                  >
-                    <Icon name={n} size={18} />
-                  </button>
-                ))}
                 <button
                   type="button"
                   aria-pressed={compareMode}
